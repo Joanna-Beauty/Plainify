@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "白话本",
+  "version": "0.4.1",
+  "description": "查询技术词的大白话解释与生活化类比，确认后收录并在网页中高亮复习。",
+  "permissions": ["storage", "contextMenus", "activeTab", "tabs", "scripting"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "白话本",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}
