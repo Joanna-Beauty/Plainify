@@ -8,9 +8,12 @@ const navItems = [
 
 export function Brand() {
   return (
-    <div className="brand" aria-label="白话本">
+    <div className="brand" aria-label="加简大白话 · Plainify｜你的个人术语库">
       <span className="brand-mark" aria-hidden="true" />
-      <span>白话本</span>
+      <span className="brand-copy">
+        <span className="brand-title">加简大白话 <small>· Plainify</small></span>
+        <span className="brand-tagline">你的个人术语库</span>
+      </span>
     </div>
   )
 }

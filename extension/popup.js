@@ -11,6 +11,7 @@ const footer = document.querySelector('footer')
 let selectionContext = { source: '手动输入', sourceUrl: '' }
 let selectionText = ''
 let currentPreview = null
+let backendRetryTimer = null
 
 function setStatus(element, message, type = '') {
   element.textContent = message
@@ -36,12 +37,30 @@ async function loadSelection() {
 }
 
 async function checkBackend() {
+  window.clearTimeout(backendRetryTimer)
   try {
-    const response = await fetch('http://127.0.0.1:8787/api/health')
+    const response = await fetch('http://127.0.0.1:8787/api/health?probe=1')
     const data = await response.json()
     if (!response.ok || !data.ok) throw new Error()
-    footer.className = data.configured ? 'ready' : 'error'
-    backendStatus.textContent = data.configured ? '本机 DeepSeek 服务已就绪' : '本机服务已启动，等待配置 Key'
+    if (data.ready) {
+      footer.className = 'ready'
+      backendStatus.textContent = '本机 DeepSeek 服务已就绪'
+      return
+    }
+    if (data.providerStatus === 'insufficient_balance') {
+      footer.className = 'recovering'
+      backendStatus.textContent = '余额不足，充值到账后自动恢复'
+    } else if (data.recoverable) {
+      footer.className = 'recovering'
+      backendStatus.textContent = 'DeepSeek 暂不可用，正在自动重连'
+    } else {
+      footer.className = 'error'
+      backendStatus.textContent = data.configured ? data.statusMessage : '本机服务已启动，等待配置 Key'
+    }
+    if (data.recoverable) {
+      const delay = Math.max(2_000, Math.min(30_000, Number(data.retryAfterMs || 5_000)))
+      backendRetryTimer = window.setTimeout(checkBackend, delay)
+    }
   } catch {
     footer.className = 'error'
     backendStatus.textContent = '本机服务未启动，请运行 npm run dev'
@@ -58,7 +77,7 @@ function renderPreview(preview) {
   document.querySelector('#analogy').textContent = item.analogy || '这个术语暂时还没有生活化类比。'
   const saved = preview.saved || preview.status === 'exists'
   addButton.disabled = saved
-  addButton.textContent = saved ? '已在白话本' : '加入白话本'
+  addButton.textContent = saved ? '已在术语库' : '加入术语库'
   setStatus(resultStatus, saved ? '这个术语已经收录，可以在术语库里查看。' : '解释已生成，确认后才会收录。', saved ? 'success' : '')
 }
 
@@ -83,7 +102,7 @@ explainButton.addEventListener('click', async () => {
   }
   explainButton.disabled = true
   explainButton.textContent = '正在生成…'
-  setStatus(queryStatus, '')
+  setStatus(queryStatus, 'DeepSeek 正在生成大白话解释和生活化类比，请稍候。')
   try {
     const metadata = term === selectionText
       ? selectionContext
@@ -101,6 +120,7 @@ explainButton.addEventListener('click', async () => {
     renderPreview(preview)
   } catch (error) {
     setStatus(queryStatus, error.message, 'error')
+    checkBackend()
   } finally {
     explainButton.disabled = false
     explainButton.textContent = '生成解释'

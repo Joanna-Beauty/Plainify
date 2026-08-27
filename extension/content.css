@@ -211,11 +211,19 @@
   font: inherit !important;
 }
 
+#baihuaben-preview[data-state="loading"] .baihuaben-preview-copy > p {
+  color: #737870 !important;
+}
+
 #baihuaben-preview [data-field="status"] {
   min-height: 18px !important;
   padding-top: 6px !important;
   color: #2c6b51 !important;
   font-size: 10px !important;
+}
+
+#baihuaben-preview[data-state="loading"] [data-field="status"] {
+  color: #686d65 !important;
 }
 
 #baihuaben-preview .baihuaben-preview-actions {

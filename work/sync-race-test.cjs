@@ -108,6 +108,7 @@ const fakeWindow = {
 
 const contentChrome = {
   runtime: {
+    id: 'test-baihuaben-extension',
     onMessage: { addListener() {} },
     sendMessage: sendToBackground,
   },
@@ -117,9 +118,17 @@ const contentChrome = {
   },
 }
 
+const documentElementAttributes = new Map()
 const fakeDocument = {
   body: null,
-  documentElement: {},
+  documentElement: {
+    getAttribute(name) {
+      return documentElementAttributes.get(name) || null
+    },
+    setAttribute(name, value) {
+      documentElementAttributes.set(name, String(value))
+    },
+  },
   querySelector(selector) {
     return selector === 'meta[name="termly-app"][content="true"]' ? {} : null
   },
@@ -138,6 +147,7 @@ const contentContext = vm.createContext({
   window: fakeWindow,
 })
 
+vm.runInContext(fs.readFileSync('extension/term-data.js', 'utf8'), contentContext)
 vm.runInContext(fs.readFileSync('extension/content.js', 'utf8'), contentContext)
 
 function flush() {
@@ -212,7 +222,17 @@ async function run() {
 
   assert.equal(storage.terms[0].status, 'ready')
   assert.equal(storage.terms[0].explanation, '模型一次最多能同时参考的内容范围。')
+  assert.equal(storage.terms[0].analogy, '像桌面能同时摊开的资料数量。')
   assert.equal(storage.terms[0].sourceUrl, 'https://example.com/article')
+
+  fakeWindow.postMessage({
+    source: 'baihuaben-web',
+    type: 'SYNC_TERMS',
+    terms: [{ ...ready, analogy: '', status: 'ready' }],
+  })
+  await flush()
+  await flush()
+  assert.equal(storage.terms[0].analogy, '像桌面能同时摊开的资料数量。')
 
   fakeWindow.postMessage({
     source: 'baihuaben-web',
@@ -242,6 +262,7 @@ async function run() {
 
   console.log('PASS explanation preview does not save until SAVE_TERM is confirmed')
   console.log('PASS stale website sync cannot overwrite a saved explanation or source URL')
+  console.log('PASS stale ready terms cannot overwrite a saved analogy with an empty value')
   console.log('PASS explanation, analogy, and hover settings survive synchronization')
   console.log('PASS legacy API Key, provider, and base URL are removed from extension storage')
 }

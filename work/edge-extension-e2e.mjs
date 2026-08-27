@@ -99,7 +99,14 @@ async function createTarget(browser, url) {
 }
 
 async function capture(client, filename) {
-  const result = await client.send('Page.captureScreenshot', { format: 'png', fromSurface: true })
+  await client.send('Page.bringToFront').catch(() => {})
+  let timeout
+  const result = await Promise.race([
+    client.send('Page.captureScreenshot', { format: 'png', fromSurface: true }),
+    new Promise((_, reject) => {
+      timeout = setTimeout(() => reject(new Error(`Timed out capturing ${filename}`)), 15000)
+    }),
+  ]).finally(() => clearTimeout(timeout))
   const path = `${artifactDir}/${filename}`
   await fs.writeFile(path, Buffer.from(result.data, 'base64'))
   return path
@@ -117,12 +124,12 @@ try {
     const targets = await getJson('/json/list')
     const serviceWorker = targets.find((target) => target.type === 'service_worker' && target.url.endsWith('/background.js'))
     return serviceWorker ? new URL(serviceWorker.url).hostname : ''
-  }, '白话本 service worker')
+  }, '加简大白话 service worker')
 
   const storageTargetId = await createTarget(browser, `chrome-extension://${extensionId}/popup.html`)
   const { client: worker } = await connectTarget(
     (target) => target.id === storageTargetId,
-    '白话本扩展存储页',
+    '加简大白话扩展存储页',
   )
   clients.push(worker)
   await evaluate(worker, `chrome.storage.local.clear()`)
@@ -139,8 +146,6 @@ try {
     deviceScaleFactor: 1,
     mobile: false,
   })
-
-  await reader.send('Page.reload', { ignoreCache: true })
 
   await waitFor(
     () => evaluate(reader, `document.readyState === 'complete'`),
@@ -166,12 +171,86 @@ try {
     () => evaluate(reader, `document.querySelector('#baihuaben-selection-button')?.style.display === 'flex'`),
     '选词解释按钮',
   )
-  await evaluate(reader, `document.querySelector('#baihuaben-selection-button').click()`)
+  await evaluate(reader, `(() => {
+    const hostileStyle = document.createElement('style')
+    hostileStyle.textContent = '#baihuaben-selection-button:hover { display: none !important; }'
+    document.head.append(hostileStyle)
+    const duplicate = document.createElement('button')
+    duplicate.id = 'baihuaben-selection-button'
+    duplicate.textContent = '重复按钮'
+    document.documentElement.append(duplicate)
+    const log = document.querySelector('#dynamic-log')
+    window.__baihuabenScrollPulse = window.setInterval(() => {
+      log.scrollTop = log.scrollTop === 0 ? 1 : 0
+    }, 180)
+  })()`)
+  await waitFor(
+    () => evaluate(reader, `document.querySelectorAll('#baihuaben-selection-button').length === 1`),
+    '清理重复选词按钮',
+  )
+  const selectionButtonRect = await evaluate(reader, `(() => {
+    const rect = document.querySelector('#baihuaben-selection-button').getBoundingClientRect()
+    return { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+  })()`)
+  const selectionButtonPoint = {
+    x: selectionButtonRect.x + selectionButtonRect.width / 2,
+    y: selectionButtonRect.y + selectionButtonRect.height / 2,
+  }
+  await reader.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...selectionButtonPoint })
+  await waitFor(
+    () => evaluate(reader, `getComputedStyle(document.querySelector('#baihuaben-selection-button')).display === 'flex'`),
+    '鼠标悬停时选词按钮保持显示',
+  )
+  await new Promise((resolve) => setTimeout(resolve, 2500))
+  assert.equal(
+    await evaluate(reader, `getComputedStyle(document.querySelector('#baihuaben-selection-button')).display`),
+    'flex',
+  )
+  console.log('STEP selection button survived continuous background scrolling')
+  await reader.send('Input.dispatchMouseEvent', {
+    type: 'mousePressed',
+    button: 'left',
+    buttons: 1,
+    clickCount: 1,
+    ...selectionButtonPoint,
+  })
+  await reader.send('Input.dispatchMouseEvent', {
+    type: 'mouseReleased',
+    button: 'left',
+    buttons: 0,
+    clickCount: 1,
+    ...selectionButtonPoint,
+  })
+  const loadingPreview = await waitFor(
+    () => evaluate(reader, `(() => {
+      const card = document.querySelector('#baihuaben-preview')
+      return card?.dataset.state === 'loading' ? {
+        busy: card?.getAttribute('aria-busy'),
+        state: card?.dataset.state,
+        text: card?.innerText || '',
+        saveDisabled: card?.querySelector('[data-action="save"]')?.disabled,
+      } : null
+    })()`),
+    '真实鼠标点击后的加载反馈',
+  )
+  assert.equal(loadingPreview.busy, 'true')
+  assert.equal(loadingPreview.state, 'loading')
+  assert.match(loadingPreview.text, /正在生成大白话解释/)
+  assert.match(loadingPreview.text, /正在生成生活化类比/)
+  assert.equal(loadingPreview.saveDisabled, true)
+  console.log('STEP loading feedback rendered immediately')
+
+  await new Promise((resolve) => setTimeout(resolve, 1200))
+  assert.equal(
+    await evaluate(reader, `getComputedStyle(document.querySelector('#baihuaben-preview')).display`),
+    'flex',
+  )
+  console.log('STEP explanation preview survived continuous background scrolling')
 
   const dismissedPreview = await waitFor(
     () => evaluate(reader, `(() => {
       const card = document.querySelector('#baihuaben-preview')
-      if (card?.style.display !== 'flex') return null
+      if (card?.style.display !== 'flex' || card.dataset.state === 'loading') return null
       const rect = card.getBoundingClientRect()
       return {
         text: card.innerText,
@@ -186,8 +265,16 @@ try {
   assert.match(dismissedPreview.text, /术语解释/)
   assert.ok(dismissedPreview.analogy.length >= 8)
   assert.ok(dismissedPreview.explanation.length >= 8)
+  assert.equal(dismissedPreview.text.includes('专业解释'), false)
+  assert.equal(dismissedPreview.text.includes('通俗解释'), false)
   assert.equal(dismissedPreview.insideViewport, true)
   assert.equal(await evaluate(worker, `chrome.storage.local.get('terms').then(({ terms }) => (terms || []).length)`), 0)
+  await new Promise((resolve) => setTimeout(resolve, 1200))
+  assert.equal(
+    await evaluate(reader, `getComputedStyle(document.querySelector('#baihuaben-preview')).display`),
+    'flex',
+  )
+  await evaluate(reader, `window.clearInterval(window.__baihuabenScrollPulse)`)
   console.log('STEP first preview generated without saving')
 
   await evaluate(reader, `document.querySelector('#baihuaben-preview [data-action="dismiss"]').click()`)
@@ -209,7 +296,10 @@ try {
       const card = document.querySelector('#baihuaben-preview')
       const explanation = card?.querySelector('[data-field="explanation"]')?.textContent || ''
       const analogy = card?.querySelector('[data-field="analogy"]')?.textContent || ''
-      return card?.style.display === 'flex' && explanation.length >= 8 && analogy.length >= 8
+      return card?.style.display === 'flex'
+        && card.dataset.state !== 'loading'
+        && explanation.length >= 8
+        && analogy.length >= 8
         ? { explanation, analogy }
         : null
     })()`),
@@ -223,14 +313,55 @@ try {
       (terms || []).some((item) => item.term === 'Context window'
         && item.explanation === ${JSON.stringify(savedPreview.explanation)}
         && item.analogy === ${JSON.stringify(savedPreview.analogy)}))`),
-    '确认加入白话本',
+    '确认加入术语库',
   )
   await waitFor(
     () => evaluate(reader, `[...document.querySelectorAll('.baihuaben-highlight')]
       .some((item) => item.textContent === 'Context window')`),
     '保存后显示黄色高亮',
   )
+  await waitFor(
+    () => evaluate(reader, `document.querySelector('#baihuaben-preview')?.style.display === 'none'`),
+    '保存提示关闭后检查悬停解释',
+  )
+  const duplicateHighlights = await evaluate(reader, `(() => {
+    const marks = [...document.querySelectorAll('.baihuaben-highlight')]
+      .filter((item) => item.textContent === 'Context window')
+    return {
+      count: marks.length,
+      analogies: marks.map((item) => item.dataset.baihuabenAnalogy),
+    }
+  })()`)
+  assert.equal(duplicateHighlights.count, 2)
+  assert.deepEqual(duplicateHighlights.analogies, [savedPreview.analogy, savedPreview.analogy])
   console.log('STEP inline selection confirmed and highlighted')
+
+  await evaluate(worker, `chrome.storage.local.get('terms').then(({ terms }) => chrome.storage.local.set({
+    terms: (terms || []).map((item) => item.term === 'Context window'
+      ? { ...item, archived: true, archivedCategory: item.category || '未分组' }
+      : item),
+  }))`)
+  await waitFor(
+    () => evaluate(reader, `[...document.querySelectorAll('.baihuaben-highlight')]
+      .every((item) => item.textContent !== 'Context window')`),
+    '归档后移除黄色高亮',
+  )
+  assert.equal(
+    await evaluate(reader, `[...document.querySelectorAll('.baihuaben-highlight')]
+      .some((item) => item.textContent === 'Context window')`),
+    false,
+  )
+  await evaluate(worker, `chrome.storage.local.get('terms').then(({ terms }) => chrome.storage.local.set({
+    terms: (terms || []).map((item) => item.term === 'Context window'
+      ? { ...item, archived: false, archivedAt: '', archivedCategory: '' }
+      : item),
+  }))`)
+  await waitFor(
+    () => evaluate(reader, `[...document.querySelectorAll('.baihuaben-highlight')]
+      .filter((item) => item.textContent === 'Context window').length === 2`),
+    '恢复后重新显示黄色高亮',
+  )
+  console.log('STEP archive removed highlights and restore added them back')
 
   await evaluate(reader, `(() => {
     const mark = [...document.querySelectorAll('.baihuaben-highlight')]
@@ -246,12 +377,19 @@ try {
   )
   assert.ok(tooltip.includes(savedPreview.explanation))
   assert.equal(tooltip.includes('生活化类比'), false)
+  assert.equal(await evaluate(reader, `document.querySelectorAll('#baihuaben-tooltip').length`), 1)
+  await evaluate(reader, `(() => {
+    const marks = [...document.querySelectorAll('.baihuaben-highlight')]
+      .filter((item) => item.textContent === 'Context window')
+    marks[1].dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+  })()`)
+  assert.equal(await evaluate(reader, `document.querySelectorAll('#baihuaben-tooltip').length`), 1)
   const readerScreenshot = await capture(reader, 'baihuaben-edge-selection-highlight.png')
 
   const appTargetId = await createTarget(browser, 'http://127.0.0.1:5173/')
   const { client: app } = await connectTarget(
     (target) => target.id === appTargetId,
-    '白话本应用页',
+    '加简大白话应用页',
   )
   clients.push(app)
   await app.send('Emulation.setDeviceMetricsOverride', {
@@ -260,6 +398,10 @@ try {
     deviceScaleFactor: 1,
     mobile: false,
   })
+  await waitFor(
+    () => evaluate(app, `location.origin === 'http://127.0.0.1:5173' && document.readyState !== 'loading'`),
+    '加简大白话应用页完成导航',
+  )
   await evaluate(app, `(() => {
     localStorage.removeItem('baihuaben:terms:v1')
     localStorage.removeItem('baihuaben:settings:v1')
@@ -282,6 +424,31 @@ try {
       .some((item) => item.textContent === 'RAG')`),
     '网站术语同步到扩展页面',
   )
+
+  await evaluate(app, `(() => {
+    const terms = JSON.parse(localStorage.getItem('baihuaben:terms:v1') || '[]')
+      .map((item) => item.term === 'Context window' ? { ...item, analogy: '' } : item)
+    window.postMessage({ source: 'baihuaben-web', type: 'SYNC_TERMS', terms }, '*')
+    return true
+  })()`)
+  await waitFor(
+    () => evaluate(worker, `chrome.storage.local.get('terms').then(({ terms }) => {
+      const matches = (terms || []).filter((item) => item.term === 'Context window')
+      return matches.length === 1 && matches[0].analogy === ${JSON.stringify(savedPreview.analogy)}
+    })`),
+    '陈旧网站数据不能清空已有类比',
+  )
+  const postSyncHighlights = await waitFor(
+    () => evaluate(reader, `(() => {
+      const marks = [...document.querySelectorAll('.baihuaben-highlight')]
+        .filter((item) => item.textContent === 'Context window')
+      const analogies = marks.map((item) => item.dataset.baihuabenAnalogy)
+      return marks.length === 2 && analogies.every(Boolean) ? { count: marks.length, analogies } : null
+    })()`),
+    '空类比同步后两处高亮保持一致',
+  )
+  assert.deepEqual(postSyncHighlights.analogies, [savedPreview.analogy, savedPreview.analogy])
+  console.log('STEP stale empty analogy could not overwrite complete extension data')
 
   const addedFromWebsite = await evaluate(app, `(() => {
     const input = document.querySelector('input[placeholder*="粘贴一个刚遇到的术语"]')
@@ -354,12 +521,82 @@ try {
     return true
   })()`)
 
+  const ungroupedBefore = await evaluate(app, `JSON.parse(localStorage.getItem('baihuaben:terms:v1') || '[]')
+    .filter((item) => item.category === '未分组').length`)
   await evaluate(app, `[...document.querySelectorAll('button')]
-    .find((button) => button.textContent.includes('自动整理分组')).click()`)
-  await waitFor(
-    () => evaluate(app, `document.body.innerText.includes('DeepSeek 已重新整理全部分组')`),
-    'DeepSeek 自动分组',
+    .find((button) => button.textContent.includes('整理未分组')).click()`)
+  const groupingPreview = await waitFor(
+    () => evaluate(app, `(() => {
+      const dialog = document.querySelector('[role="dialog"][aria-labelledby="grouping-preview-title"]')
+      if (!dialog?.innerText.includes('整理前预览')) return null
+      return {
+        changes: dialog.querySelectorAll('.preview-change-row').length,
+        canApply: [...dialog.querySelectorAll('button')]
+          .some((button) => button.textContent.includes('应用分组')),
+      }
+    })()`),
+    'DeepSeek 增量分组预览',
+    45000,
   )
+  assert.ok(groupingPreview.changes > 0)
+  assert.equal(groupingPreview.canApply, true)
+  await evaluate(app, `[...document.querySelectorAll('[role="dialog"] button')]
+    .find((button) => button.textContent.includes('应用分组')).click()`)
+  await waitFor(
+    () => evaluate(app, `!document.querySelector('[role="dialog"][aria-labelledby="grouping-preview-title"]')
+      && JSON.parse(localStorage.getItem('baihuaben:terms:v1') || '[]')
+        .filter((item) => item.category === '未分组').length < ${ungroupedBefore}`),
+    '应用 DeepSeek 增量分组',
+  )
+
+  await evaluate(app, `(() => {
+    const groups = JSON.parse(localStorage.getItem('baihuaben:groups:v1') || '[]')
+    localStorage.setItem('baihuaben:groups:v1', JSON.stringify([...new Set([...groups, '应被删除的旧分组'])]))
+    location.reload()
+    return true
+  })()`)
+  await waitFor(
+    () => evaluate(app, `JSON.parse(localStorage.getItem('baihuaben:groups:v1') || '[]')
+      .includes('应被删除的旧分组') && Boolean(document.querySelector('.library-page'))`),
+    '准备全量重分组的旧分组',
+  )
+  await evaluate(app, `(() => {
+    document.querySelector('.organize-menu summary').click()
+    Array.from(document.querySelectorAll('.organize-menu button'))
+      .find((button) => button.textContent.includes('重新整理全部术语')).click()
+  })()`)
+  const fullGroupingPreview = await waitFor(
+    () => evaluate(app, `(() => {
+      const dialog = document.querySelector('[role="dialog"][aria-labelledby="grouping-preview-title"]')
+      if (!dialog?.innerText.includes('应被删除的旧分组')) return null
+      return {
+        text: dialog.innerText,
+        removedGroups: Array.from(dialog.querySelectorAll('.removed-group-list strong')).map((item) => item.textContent),
+      }
+    })()`),
+    '全量重分组预览旧分组删除',
+    45000,
+  )
+  assert.ok(fullGroupingPreview.text.includes('个旧分组将删除'))
+  assert.ok(fullGroupingPreview.removedGroups.includes('应被删除的旧分组'))
+  await evaluate(app, `[...document.querySelectorAll('[role="dialog"] button')]
+    .find((button) => button.textContent.includes('应用分组')).click()`)
+  await waitFor(
+    () => evaluate(app, `(() => {
+      const terms = JSON.parse(localStorage.getItem('baihuaben:terms:v1') || '[]')
+      const groups = JSON.parse(localStorage.getItem('baihuaben:groups:v1') || '[]')
+      const counts = new Map()
+      for (const term of terms) counts.set(term.category, (counts.get(term.category) || 0) + 1)
+      const termGroups = [...counts.keys()].filter((group) => group !== '未分组')
+      return !groups.includes('应被删除的旧分组')
+        && groups.length === termGroups.length
+        && groups.every((group) => termGroups.includes(group))
+        && groups.length <= 5
+        && [...counts].filter(([group]) => group !== '未分组').every(([, count]) => count >= 3)
+    })()`),
+    '应用全量大类分组并删除旧分组',
+  )
+  console.log('STEP full regroup produced broad categories and removed obsolete groups')
 
   const reviewTerm = await evaluate(app, `(() => {
     [...document.querySelectorAll('button')]
@@ -502,7 +739,7 @@ try {
     })()`),
     '扩展弹窗控件',
   )
-  assert.equal(popupState.title, '白话本')
+  assert.equal(popupState.title, '加简大白话 · Plainify｜你的个人术语库')
   assert.equal(popupState.buttonText, '生成解释')
   const popupBackend = await waitFor(
     () => evaluate(popup, `(() => {
@@ -514,12 +751,18 @@ try {
   assert.match(popupBackend, /已就绪/)
   console.log('STEP popup query view ready')
 
-  await evaluate(popup, `(() => {
+  const popupLoading = await evaluate(popup, `(() => {
     const input = document.querySelector('#term')
     input.value = 'PopupSmokeTerm'
     input.dispatchEvent(new Event('input', { bubbles: true }))
     document.querySelector('#explain').click()
+    return {
+      buttonText: document.querySelector('#explain').textContent.trim(),
+      status: document.querySelector('#query-status').textContent.trim(),
+    }
   })()`)
+  assert.equal(popupLoading.buttonText, '正在生成…')
+  assert.match(popupLoading.status, /DeepSeek 正在生成大白话解释和生活化类比/)
   await waitFor(
     () => evaluate(popup, `chrome.storage.local.get(['terms', 'popupPreview']).then(({ terms, popupPreview }) =>
       popupPreview?.item?.term === 'PopupSmokeTerm'
@@ -567,15 +810,27 @@ try {
     checks: {
       contentScriptInjected: true,
       inlineSelectionButton: true,
+      selectionButtonSurvivesBackgroundScroll: true,
+      selectionButtonSurvivesHover: true,
+      duplicateSelectionButtonsRemoved: true,
+      realPointerClickStartsPreview: true,
       previewBeforeSave: true,
+      previewSurvivesBackgroundScroll: true,
       dismissWithoutSave: true,
       confirmedSaveAndHighlight: true,
+      archiveRemovesHighlights: true,
+      restoreAddsHighlightsBack: true,
       hoverTooltip: true,
+      duplicateHighlightsShareCompleteData: true,
+      staleEmptyAnalogyCannotOverwrite: true,
+      singleTooltipInstance: true,
       extensionToWebsiteSync: true,
       websiteToExtensionSync: true,
       websiteSearch: true,
       websiteTermEditing: true,
       websiteGrouping: true,
+      broadFullRegroup: true,
+      obsoleteGroupsRemoved: true,
       websiteReview: true,
       popupPreviewPersistsBeforeSave: true,
       popupConfirmSaveAndClear: true,

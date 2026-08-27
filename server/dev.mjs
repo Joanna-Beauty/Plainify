@@ -5,7 +5,7 @@ import { startApiServer } from './index.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const { host, port, server } = await startApiServer()
-console.log(`白话本后端：http://${host}:${port}`)
+console.log(`加简大白话后端：http://${host}:${port}`)
 
 const vite = spawn(path.join(root, 'node_modules', '.bin', 'vite'), [
   '--host',

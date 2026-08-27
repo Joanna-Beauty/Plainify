@@ -4,17 +4,20 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23ffd84d'/%3E%3C/svg%3E" />
-    <title>白话本扩展验收页</title>
+    <title>加简大白话 · Plainify 扩展验收页</title>
     <style>
       body { max-width: 760px; margin: 64px auto; padding: 0 24px; color: #20231f; font: 18px/1.8 system-ui, sans-serif; }
       h1 { font-size: 30px; }
       article { padding: 28px; border: 1px solid #dfe3db; border-radius: 8px; }
+      #dynamic-log { max-height: 210px; overflow: auto; }
+      #dynamic-log::after { display: block; height: 260px; content: ""; }
     </style>
   </head>
   <body>
     <h1>技术文档阅读测试</h1>
-    <article>
+    <article id="dynamic-log">
       <p id="selection-target">Context window 决定模型一次能参考多少内容。</p>
+      <p>阅读长文时，第二处 Context window 也必须显示完全相同的解释。</p>
       <p>RAG 会先检索资料，再让模型组织答案。</p>
       <p>网站稍后会添加术语 EdgeSmokeTerm，并检查这里是否自动高亮。</p>
     </article>

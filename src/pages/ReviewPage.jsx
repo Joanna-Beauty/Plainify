@@ -3,6 +3,7 @@ import { ArrowLeft, Check, RotateCcw, X } from 'lucide-react'
 
 export default function ReviewPage({ terms, onReview, onBack }) {
   const queue = useMemo(() => [...terms]
+    .filter((term) => !term.archived)
     .sort((a, b) => Number(a.mastered) - Number(b.mastered) || a.reviewCount - b.reviewCount)
     .slice(0, 5), [terms])
   const [index, setIndex] = useState(0)

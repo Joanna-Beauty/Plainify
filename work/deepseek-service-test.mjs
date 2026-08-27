@@ -6,6 +6,7 @@ const {
   explainTerm,
   fetchProviderModels,
   getBackendStatus,
+  organizeLocally,
   organizeWithAi,
   testAiConnection,
 } = await vite.ssrLoadModule('/src/services/ai.js')
@@ -26,7 +27,7 @@ globalThis.fetch = async (url, options = {}) => {
     return {
       ok: true,
       async json() {
-        return { ok: true, models: ['deepseek-reasoner', 'deepseek-chat'] }
+        return { ok: true, models: ['deepseek-v4-flash', 'deepseek-reasoner', 'deepseek-chat'] }
       },
     }
   }
@@ -45,7 +46,13 @@ globalThis.fetch = async (url, options = {}) => {
   if (url.endsWith('/organize')) return {
     ok: true,
     async json() {
-      return { ok: true, assignments: [{ id: 'term-1', category: '大模型基础' }] }
+      return {
+        ok: true,
+        assignments: [
+          { id: 'term-new', category: '大模型基础' },
+          { id: 'term-stable', category: '不应覆盖旧分组' },
+        ],
+      }
     },
   }
   return { ok: true, async json() { return { ok: true, message: '连接成功' } } }
@@ -79,13 +86,29 @@ assert.equal(calls[3].url, 'http://127.0.0.1:8787/api/test')
 assert.deepEqual(JSON.parse(calls[3].options.body), { model: 'gpt-5' })
 
 const organized = await organizeWithAi([
-  { id: 'term-1', term: 'RAG', explanation: '先检索后回答', category: '未分组' },
-], { apiKey: 'sk-test', model: 'deepseek-chat' })
+  { id: 'term-new', term: 'RAG', explanation: '先检索后回答', category: '未分组' },
+  { id: 'term-stable', term: 'Commit', explanation: '一次代码提交', category: '版本控制' },
+], { apiKey: 'sk-test', model: 'deepseek-chat' }, 'incremental', ['版本控制', '空分组'])
 assert.equal(organized[0].category, '大模型基础')
+assert.equal(organized[1].category, '版本控制')
 
 assert.equal(calls[4].url, 'http://127.0.0.1:8787/api/organize')
+assert.deepEqual(JSON.parse(calls[4].options.body), {
+  model: 'deepseek-chat',
+  mode: 'incremental',
+  existingCategories: ['版本控制', '空分组'],
+  terms: [{ id: 'term-new', term: 'RAG', explanation: '先检索后回答' }],
+})
+
+const localOrganized = organizeLocally([
+  { id: 'local-new', term: 'CORS', explanation: '浏览器跨域规则', category: '未分组' },
+  { id: 'local-stable', term: 'Commit', explanation: '一次代码提交', category: '我的固定分组' },
+])
+assert.equal(localOrganized[0].category, 'API 与网络')
+assert.equal(localOrganized[1].category, '我的固定分组')
 assert.equal(calls.some((call) => JSON.stringify(call).includes('must-not-leave-browser')), false)
 
 console.log('PASS website uses the localhost backend for status, models, explanation, test, and grouping')
 console.log('PASS legacy browser API Key is never sent in URL, headers, or request body')
+console.log('PASS incremental grouping sends only ungrouped terms and preserves existing categories')
 await vite.close()

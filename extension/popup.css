@@ -31,7 +31,14 @@ body > header {
 
 body > header strong {
   font-family: "Songti SC", serif;
-  font-size: 16px;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+body > header strong small {
+  color: #747970;
+  font-family: Arial, sans-serif;
+  font-size: 9px;
 }
 
 body > header button {
@@ -187,4 +194,6 @@ footer {
 }
 
 footer.ready #backend-dot { background: #2f8a62; }
+footer.recovering { color: #80631c; }
+footer.recovering #backend-dot { background: #d4a923; }
 footer.error #backend-dot { background: #bd5a49; }

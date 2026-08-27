@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "白话本",
-  "version": "0.4.1",
+  "name": "加简大白话 · Plainify",
+  "version": "0.4.8",
   "description": "查询技术词的大白话解释与生活化类比，确认后收录并在网页中高亮复习。",
   "permissions": ["storage", "contextMenus", "activeTab", "tabs", "scripting"],
   "host_permissions": ["<all_urls>"],
@@ -9,13 +9,13 @@
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "白话本",
+    "default_title": "加简大白话 · Plainify｜你的个人术语库",
     "default_popup": "popup.html"
   },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["content.js"],
+      "js": ["term-data.js", "content.js"],
       "css": ["content.css"],
       "run_at": "document_idle"
     }

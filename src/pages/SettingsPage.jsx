@@ -19,13 +19,45 @@ function modelOptionsFor(settings, remoteModels = []) {
   return [...new Set(availableModels.filter(Boolean))]
 }
 
+function backendState(status = {}) {
+  return {
+    loading: false,
+    connected: true,
+    configured: Boolean(status.configured),
+    ready: Boolean(status.ready),
+    providerStatus: String(status.providerStatus || 'unknown'),
+    recoverable: Boolean(status.recoverable),
+    retryAfterMs: Number(status.retryAfterMs || 0),
+  }
+}
+
+function backendStatusText(status, modelCount = 0) {
+  if (!status.configured) return '本机后端已连接；在 .env.local 配置 Key 后重启服务。'
+  if (status.ready) return `后端与 DeepSeek 已连接，获取到 ${modelCount} 个可用模型。`
+  if (status.providerStatus === 'insufficient_balance') {
+    return 'DeepSeek 余额不足，正在等待充值到账；到账后会自动恢复，无需重启。'
+  }
+  if (status.providerStatus === 'rate_limited') return 'DeepSeek 请求频繁，正在后台自动重试。'
+  if (status.providerStatus === 'auth_failed') return status.statusMessage || 'DeepSeek API Key 无效或没有权限。'
+  if (status.recoverable) return `${status.statusMessage || 'DeepSeek 暂时不可用'}；正在后台自动重试。`
+  return status.statusMessage || '正在检查 DeepSeek 真实连接状态。'
+}
+
 export default function SettingsPage({ settings, onSave, extensionReady, onSyncExtension, showToast }) {
   const normalizedSettings = useMemo(() => normalizeProviderSettings(settings), [settings])
   const [draft, setDraft] = useState(normalizedSettings)
   const [models, setModels] = useState(() => modelOptionsFor(normalizedSettings))
   const [testing, setTesting] = useState(false)
   const [loadingModels, setLoadingModels] = useState(false)
-  const [backend, setBackend] = useState({ loading: true, configured: false, connected: false })
+  const [backend, setBackend] = useState({
+    loading: true,
+    configured: false,
+    connected: false,
+    ready: false,
+    providerStatus: 'unknown',
+    recoverable: false,
+    retryAfterMs: 0,
+  })
   const [modelStatus, setModelStatus] = useState('正在连接本机 DeepSeek 服务…')
   const modelRequestId = useRef(0)
 
@@ -38,25 +70,34 @@ export default function SettingsPage({ settings, onSave, extensionReady, onSyncE
     const requestId = modelRequestId.current + 1
     modelRequestId.current = requestId
     setLoadingModels(true)
-    setModelStatus('正在从本机后端获取 DeepSeek 模型…')
+    setModelStatus('正在检查本机后端和 DeepSeek 真实连接…')
     try {
-      const [status, fetchedModels] = await Promise.all([
-        getBackendStatus(signal),
+      const [statusResult, modelsResult] = await Promise.allSettled([
+        getBackendStatus(signal, true),
         fetchProviderModels(config, signal),
       ])
       if (requestId !== modelRequestId.current) return
+      if (statusResult.status === 'rejected') throw statusResult.reason
+      const status = statusResult.value
+      const fetchedModels = modelsResult.status === 'fulfilled' ? modelsResult.value : []
       const nextModels = modelOptionsFor(config, fetchedModels)
-      setBackend({ loading: false, connected: true, configured: status.configured })
+      setBackend(backendState(status))
       setModels(nextModels)
       setDraft((current) => nextModels.includes(current.model)
         ? current
         : { ...current, model: nextModels.includes('deepseek-chat') ? 'deepseek-chat' : nextModels[0] })
-      setModelStatus(status.configured
-        ? `本机后端已连接，获取到 ${nextModels.length} 个 DeepSeek 模型。`
-        : '本机后端已连接；填好 .env.local 后重启服务即可生成解释。')
+      setModelStatus(backendStatusText(status, nextModels.length))
     } catch (error) {
       if (requestId !== modelRequestId.current) return
-      setBackend({ loading: false, connected: false, configured: false })
+      setBackend({
+        loading: false,
+        connected: false,
+        configured: false,
+        ready: false,
+        providerStatus: 'backend_unreachable',
+        recoverable: false,
+        retryAfterMs: 0,
+      })
       setModels(modelOptionsFor(config))
       setModelStatus(error.message)
     } finally {
@@ -73,6 +114,27 @@ export default function SettingsPage({ settings, onSave, extensionReady, onSyncE
     }
   }, [normalizedSettings, refreshBackend])
 
+  useEffect(() => {
+    if (!backend.connected || !backend.configured || backend.ready || !backend.recoverable) return undefined
+    let cancelled = false
+    const delay = Math.max(2_000, Math.min(30_000, backend.retryAfterMs || 5_000))
+    const timer = window.setTimeout(async () => {
+      try {
+        const status = await getBackendStatus(undefined, true)
+        if (cancelled) return
+        setBackend(backendState(status))
+        setModelStatus(backendStatusText(status, models.length))
+        if (status.ready) showToast('DeepSeek 充值已到账，连接已自动恢复。', 'success')
+      } catch (error) {
+        if (!cancelled) setModelStatus(error.message)
+      }
+    }, delay)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [backend, models.length, showToast])
+
   function save(event) {
     event.preventDefault()
     onSave(normalizeProviderSettings(draft))
@@ -87,13 +149,18 @@ export default function SettingsPage({ settings, onSave, extensionReady, onSyncE
       showToast(error.message)
     } finally {
       setTesting(false)
+      refreshBackend(draft)
     }
   }
 
   const backendLabel = backend.loading
     ? '正在检查本机后端'
-    : backend.configured
+    : backend.ready
       ? '后端与 DeepSeek 已就绪'
+      : backend.providerStatus === 'insufficient_balance'
+        ? '等待 DeepSeek 充值到账'
+        : backend.configured
+          ? '后端已启动，DeepSeek 正在恢复'
       : backend.connected
         ? '后端已启动，等待配置 Key'
         : '本机后端未连接'
@@ -111,9 +178,9 @@ export default function SettingsPage({ settings, onSave, extensionReady, onSyncE
               <ServerCog size={20} />
               <div><h2>本机 DeepSeek 服务</h2><p>接口地址和 API Key 均由后端管理。</p></div>
             </div>
-            <div className={backend.configured ? 'provider-fixed backend-ready' : 'provider-fixed'} aria-label="后端连接状态">
+            <div className={backend.ready ? 'provider-fixed backend-ready' : backend.recoverable ? 'provider-fixed backend-recovering' : 'provider-fixed'} aria-label="后端连接状态">
               <strong>DeepSeek</strong>
-              <small>{backend.configured ? '已就绪' : '本机配置'}</small>
+              <small>{backend.ready ? '已就绪' : backend.recoverable ? '自动恢复中' : '本机配置'}</small>
               <span>{backendLabel}</span>
             </div>
             <label>
@@ -171,7 +238,7 @@ export default function SettingsPage({ settings, onSave, extensionReady, onSyncE
         <aside className="extension-panel">
           <div className="extension-panel-icon"><Puzzle aria-hidden="true" size={25} /></div>
           <h2>浏览器扩展</h2>
-          <p>选中术语后先查看大白话解释，再决定要不要加入白话本。</p>
+          <p>选中术语后先查看大白话解释，再决定要不要加入个人术语库。</p>
           <div className={extensionReady ? 'extension-check connected' : 'extension-check'}>
             {extensionReady ? <CheckCircle2 size={17} /> : <span className="status-dot" />}
             {extensionReady ? '已检测到扩展' : '暂未检测到扩展'}

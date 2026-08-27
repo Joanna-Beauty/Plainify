@@ -1,8 +1,13 @@
 import { useState } from 'react'
-import { Trash2, X } from 'lucide-react'
+import { Archive, ArchiveRestore, Trash2, X } from 'lucide-react'
+import { archivedCategoryFor } from '../data/archive'
 
-export default function TermDrawer({ term, onClose, onDelete, onSave }) {
+export default function TermDrawer({ term, groups, onArchive, onClose, onDelete, onRestore, onSave }) {
   const [draft, setDraft] = useState(term)
+  const displayedCategory = draft.archived ? archivedCategoryFor(draft) : draft.category
+  const groupOptions = groups.includes(displayedCategory) || displayedCategory === '未分组'
+    ? groups
+    : [...groups, displayedCategory]
 
   function updateField(event) {
     setDraft((current) => ({ ...current, [event.target.name]: event.target.value }))
@@ -47,7 +52,10 @@ export default function TermDrawer({ term, onClose, onDelete, onSave }) {
           <div className="form-grid">
             <label>
               分组
-              <input name="category" onChange={updateField} value={draft.category} />
+              <select disabled={draft.archived} name="category" onChange={updateField} value={displayedCategory}>
+                <option value="未分组">未分组</option>
+                {groupOptions.map((group) => <option key={group} value={group}>{group}</option>)}
+              </select>
             </label>
             <label>
               来源
@@ -68,6 +76,17 @@ export default function TermDrawer({ term, onClose, onDelete, onSave }) {
               <Trash2 aria-hidden="true" size={16} />
               删除术语
             </button>
+            {term.archived ? (
+              <button className="secondary-button" onClick={() => onRestore(term.id)} type="button">
+                <ArchiveRestore aria-hidden="true" size={16} />
+                恢复到术语库
+              </button>
+            ) : (
+              <button className="secondary-button" onClick={() => onArchive(term.id)} type="button">
+                <Archive aria-hidden="true" size={16} />
+                归档术语
+              </button>
+            )}
             <button className="primary-button" type="submit">保存修改</button>
           </div>
         </form>

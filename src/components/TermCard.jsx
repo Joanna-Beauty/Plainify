@@ -1,7 +1,9 @@
-import { Check, Clock3, ExternalLink, MoreHorizontal, Sparkles } from 'lucide-react'
+import { ArchiveRestore, Check, Clock3, ExternalLink, MoreHorizontal, Sparkles, Trash2 } from 'lucide-react'
+import { archivedCategoryFor } from '../data/archive'
 
-export default function TermCard({ term, onOpen, onToggleMastered, onExplain }) {
+export default function TermCard({ term, onArchive, onDelete, onOpen, onRestore, onExplain }) {
   const isPending = term.status !== 'ready'
+  const displayCategory = term.archived ? archivedCategoryFor(term) : term.category
   let sourceHost = ''
   if (term.sourceUrl) {
     try {
@@ -20,7 +22,7 @@ export default function TermCard({ term, onOpen, onToggleMastered, onExplain }) 
 
   return (
     <article
-      className={term.mastered ? 'term-row mastered' : 'term-row'}
+      className={term.archived ? 'term-row archived' : 'term-row'}
       onClick={() => onOpen(term.id)}
       onKeyDown={handleKeyDown}
       role="button"
@@ -65,17 +67,40 @@ export default function TermCard({ term, onOpen, onToggleMastered, onExplain }) 
         )}
       </div>
       <div className="term-row-side">
-        <span className={term.category === '未分组' ? 'category-tag ungrouped' : 'category-tag'}>{term.category}</span>
+        <span className={displayCategory === '未分组' ? 'category-tag ungrouped' : 'category-tag'}>{displayCategory}</span>
         <div className="row-actions">
-          <button
-            aria-label={term.mastered ? `将 ${term.term} 标为待复习` : `将 ${term.term} 标为已掌握`}
-            className={term.mastered ? 'icon-button mastered' : 'icon-button'}
-            onClick={(event) => { event.stopPropagation(); onToggleMastered(term.id) }}
-            title={term.mastered ? '标为待复习' : '标为已掌握'}
-            type="button"
-          >
-            <Check aria-hidden="true" size={16} />
-          </button>
+          {term.archived ? (
+            <>
+              <button
+                aria-label={`恢复 ${term.term}`}
+                className="icon-button restore-button"
+                onClick={(event) => { event.stopPropagation(); onRestore(term.id) }}
+                title="恢复到术语库"
+                type="button"
+              >
+                <ArchiveRestore aria-hidden="true" size={16} />
+              </button>
+              <button
+                aria-label={`删除 ${term.term}`}
+                className="icon-button danger-icon"
+                onClick={(event) => { event.stopPropagation(); onDelete(term.id) }}
+                title="永久删除"
+                type="button"
+              >
+                <Trash2 aria-hidden="true" size={15} />
+              </button>
+            </>
+          ) : (
+            <button
+              aria-label={`将 ${term.term} 归档`}
+              className="icon-button"
+              onClick={(event) => { event.stopPropagation(); onArchive(term.id) }}
+              title="已经熟悉，归档"
+              type="button"
+            >
+              <Check aria-hidden="true" size={16} />
+            </button>
+          )}
           <button
             aria-label={`查看 ${term.term} 详情`}
             className="icon-button"

@@ -1,4 +1,10 @@
 (() => {
+  const extensionInstanceId = chrome.runtime.id
+  const ownerAttribute = 'data-baihuaben-extension-owner'
+  const existingOwner = document.documentElement.getAttribute(ownerAttribute)
+  if (existingOwner && existingOwner !== extensionInstanceId) return
+  document.documentElement.setAttribute(ownerAttribute, extensionInstanceId)
+
   if (window.__baihuabenContentLoaded) return
   window.__baihuabenContentLoaded = true
 
@@ -15,16 +21,25 @@
   let previewCard = null
   let previewItem = null
   let previewStatus = ''
+  let previewRequestId = 0
+  let scrollFrame = 0
+
+  function keepSingleUiElement(selector, current) {
+    if (!current) return
+    for (const element of document.querySelectorAll(selector)) {
+      if (element !== current) element.remove()
+    }
+    if (!current.isConnected) document.documentElement.append(current)
+  }
+
+  function removeDuplicateUi() {
+    keepSingleUiElement('#baihuaben-tooltip', tooltip)
+    keepSingleUiElement('#baihuaben-selection-button', selectionButton)
+    keepSingleUiElement('#baihuaben-preview', previewCard)
+  }
 
   function normalizeTerms(items) {
-    return (Array.isArray(items) ? items : [])
-      .filter((item) => item?.term)
-      .map((item) => ({
-        ...item,
-        explanation: item.explanation || '已收录，等待生成大白话解释。',
-        analogy: item.analogy || '已收录，等待生成生活化类比。',
-      }))
-      .sort((a, b) => b.term.length - a.term.length)
+    return globalThis.BaihuabenTermData.normalizeHighlightTerms(items)
   }
 
   function normalizeSettings(value = {}) {
@@ -118,15 +133,16 @@
   }
 
   function ensureTooltip() {
-    if (tooltip) return tooltip
-    tooltip = document.createElement('div')
-    tooltip.id = 'baihuaben-tooltip'
-    document.documentElement.append(tooltip)
+    if (!tooltip) {
+      tooltip = document.createElement('div')
+      tooltip.id = 'baihuaben-tooltip'
+    }
+    keepSingleUiElement('#baihuaben-tooltip', tooltip)
     return tooltip
   }
 
   function showTooltip(mark) {
-    hidePreview()
+    if (previewCard?.style.display === 'flex') return
     const element = ensureTooltip()
     const title = document.createElement('strong')
     title.textContent = mark.dataset.baihuabenTerm || ''
@@ -147,7 +163,7 @@
       addSection('生活化类比', mark.dataset.baihuabenAnalogy, '这个术语暂时还没有生活化类比。')
     }
     element.replaceChildren(...children)
-    element.style.display = 'block'
+    element.style.setProperty('display', 'block', 'important')
     const markRect = mark.getBoundingClientRect()
     const tipRect = element.getBoundingClientRect()
     const left = Math.max(12, Math.min(markRect.left, window.innerWidth - tipRect.width - 12))
@@ -158,23 +174,24 @@
   }
 
   function hideTooltip() {
-    if (tooltip) tooltip.style.display = 'none'
+    if (tooltip) tooltip.style.setProperty('display', 'none', 'important')
   }
 
   function hideSelectionButton() {
-    if (selectionButton) selectionButton.style.display = 'none'
+    if (selectionButton) selectionButton.style.setProperty('display', 'none', 'important')
     selectedText = ''
     selectedRect = null
   }
 
   function hidePreview() {
-    if (previewCard) previewCard.style.display = 'none'
+    if (previewCard) previewCard.style.setProperty('display', 'none', 'important')
     previewItem = null
     previewStatus = ''
+    previewRequestId += 1
   }
 
   function positionFloating(element, rect, gap = 9) {
-    element.style.display = 'flex'
+    element.style.setProperty('display', 'flex', 'important')
     const elementRect = element.getBoundingClientRect()
     const left = Math.max(10, Math.min(rect.left, window.innerWidth - elementRect.width - 10))
     const below = rect.bottom + gap
@@ -186,7 +203,10 @@
   }
 
   function ensurePreviewCard() {
-    if (previewCard) return previewCard
+    if (previewCard) {
+      keepSingleUiElement('#baihuaben-preview', previewCard)
+      return previewCard
+    }
     previewCard = document.createElement('section')
     previewCard.id = 'baihuaben-preview'
     previewCard.setAttribute('role', 'dialog')
@@ -208,7 +228,7 @@
       <p data-field="status" aria-live="polite"></p>
       <div class="baihuaben-preview-actions">
         <button type="button" data-action="dismiss">先不添加</button>
-        <button type="button" data-action="save">加入白话本</button>
+        <button type="button" data-action="save">加入术语库</button>
       </div>
     `
     previewCard.addEventListener('click', async (event) => {
@@ -233,7 +253,7 @@
         })
         if (!result?.ok) throw new Error(result?.error || '添加失败')
         previewStatus = 'exists'
-        saveButton.textContent = result.status === 'exists' ? '已在白话本' : '已加入白话本 ✓'
+        saveButton.textContent = result.status === 'exists' ? '已在术语库' : '已加入术语库 ✓'
         status.textContent = '以后在网页里遇到它，会自动显示黄色高亮。'
         window.setTimeout(hidePreview, 1400)
       } catch (error) {
@@ -242,30 +262,47 @@
         status.textContent = error.message
       }
     })
-    document.documentElement.append(previewCard)
+    keepSingleUiElement('#baihuaben-preview', previewCard)
     return previewCard
   }
 
   function showPreview(item, status, rect, error = '') {
     const card = ensurePreviewCard()
-    previewItem = item
+    const isLoading = status === 'loading'
+    const hasError = status === 'error' || Boolean(error)
+    previewItem = isLoading || hasError ? null : item
     previewStatus = status
+    card.dataset.state = status
+    card.setAttribute('aria-busy', String(isLoading))
     card.querySelector('[data-field="term"]').textContent = item.term || ''
-    card.querySelector('[data-field="explanation"]').textContent = item.explanation || error
+    card.querySelector('[data-field="explanation"]').textContent = isLoading
+      ? '正在生成大白话解释…'
+      : item.explanation || (hasError ? '这次没有生成成功。' : '暂时没有大白话解释。')
     const analogy = card.querySelector('[data-field="analogy"]')
-    analogy.textContent = item.analogy || (error ? '' : '暂时没有生活化类比。')
+    analogy.textContent = isLoading
+      ? '正在生成生活化类比…'
+      : item.analogy || (hasError ? '这次没有生成成功。' : '暂时没有生活化类比。')
     const statusLine = card.querySelector('[data-field="status"]')
-    statusLine.textContent = error
+    statusLine.textContent = isLoading ? 'DeepSeek 正在生成，通常需要几秒。' : error
     const dismissButton = card.querySelector('[data-action="dismiss"]')
     const saveButton = card.querySelector('[data-action="save"]')
-    dismissButton.textContent = status === 'exists' ? '关闭' : '先不添加'
-    saveButton.disabled = status === 'exists' || Boolean(error)
-    saveButton.textContent = status === 'exists' ? '已在白话本' : error ? '暂时无法添加' : '加入白话本'
+    dismissButton.textContent = status === 'exists' || isLoading ? '关闭' : '先不添加'
+    saveButton.disabled = status === 'exists' || isLoading || hasError
+    saveButton.textContent = status === 'exists'
+      ? '已在术语库'
+      : isLoading
+        ? '解释生成后可添加'
+        : hasError
+          ? '暂时无法添加'
+          : '加入术语库'
     positionFloating(card, rect, 10)
   }
 
   function ensureSelectionButton() {
-    if (selectionButton) return selectionButton
+    if (selectionButton) {
+      keepSingleUiElement('#baihuaben-selection-button', selectionButton)
+      return selectionButton
+    }
     selectionButton = document.createElement('button')
     selectionButton.id = 'baihuaben-selection-button'
     selectionButton.type = 'button'
@@ -275,8 +312,11 @@
       if (!selectedText || !selectedRect) return
       const term = selectedText
       const rect = selectedRect
+      const requestId = ++previewRequestId
       selectionButton.disabled = true
       selectionButton.textContent = '正在解释…'
+      showPreview({ term, explanation: '', analogy: '' }, 'loading', rect)
+      hideSelectionButton()
       try {
         const result = await chrome.runtime.sendMessage({
           type: 'EXPLAIN_TERM',
@@ -284,17 +324,18 @@
           source: document.title || location.hostname,
           sourceUrl: location.href,
         })
+        if (requestId !== previewRequestId) return
         if (!result?.ok) throw new Error(result?.error || '解释失败')
         showPreview(result.term, result.status, rect)
       } catch (error) {
+        if (requestId !== previewRequestId) return
         showPreview({ term, explanation: '' }, 'error', rect, error.message)
       } finally {
         selectionButton.disabled = false
         selectionButton.textContent = '用大白话解释'
-        hideSelectionButton()
       }
     })
-    document.documentElement.append(selectionButton)
+    keepSingleUiElement('#baihuaben-selection-button', selectionButton)
     return selectionButton
   }
 
@@ -329,8 +370,32 @@
     positionFloating(ensureSelectionButton(), rect)
   }
 
-  function scheduleSelectionButton() {
+  function scheduleSelectionButton(event) {
+    if (event?.target.closest?.('#baihuaben-selection-button, #baihuaben-preview')) return
     window.setTimeout(showSelectionButton, 0)
+  }
+
+  function repositionSelectionButton() {
+    hideTooltip()
+    if (!selectionButton || selectionButton.style.display !== 'flex' || !selectedText) return
+    window.cancelAnimationFrame(scrollFrame)
+    scrollFrame = window.requestAnimationFrame(() => {
+      scrollFrame = 0
+      const selection = window.getSelection()
+      const value = selection?.toString().trim().replace(/\s+/g, ' ') || ''
+      if (!selection || selection.rangeCount === 0 || value !== selectedText) return
+      const rect = selection.getRangeAt(0).getBoundingClientRect()
+      if ((!rect.width && !rect.height) || rect.bottom < 0 || rect.top > window.innerHeight) return
+      selectedRect = {
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+        left: rect.left,
+        width: rect.width,
+        height: rect.height,
+      }
+      positionFloating(selectionButton, rect)
+    })
   }
 
   document.addEventListener('mouseover', (event) => {
@@ -347,10 +412,8 @@
     document.addEventListener('mousedown', (event) => {
       if (!event.target.closest?.('#baihuaben-selection-button, #baihuaben-preview')) hideSelectionButton()
     }, true)
-    document.addEventListener('scroll', () => {
-      hideSelectionButton()
-      hidePreview()
-    }, { capture: true, passive: true })
+    document.addEventListener('scroll', repositionSelectionButton, { capture: true, passive: true })
+    window.addEventListener('resize', repositionSelectionButton, { passive: true })
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -396,6 +459,7 @@
 
   if (!isAppPage) {
     const observer = new MutationObserver((mutations) => {
+      removeDuplicateUi()
       const onlyExtensionNodes = mutations.every((mutation) => [...mutation.addedNodes].every((node) => (
         node.nodeType === Node.TEXT_NODE
         || node.classList?.contains('baihuaben-highlight')

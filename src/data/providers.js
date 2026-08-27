@@ -11,7 +11,7 @@ export function getProvider() {
 
 export function normalizeProviderSettings(settings = {}) {
   const storedModel = String(settings.model || '')
-  const isDeepSeekModel = /^deepseek(?:-|$)/i.test(storedModel)
+  const isDeepSeekModel = deepSeekProvider.fallbackModels.includes(storedModel)
   const hoverExplanationMode = ['explanation', 'analogy', 'both'].includes(settings.hoverExplanationMode)
     ? settings.hoverExplanationMode
     : 'explanation'

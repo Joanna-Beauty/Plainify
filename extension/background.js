@@ -1,7 +1,17 @@
 const MENU_ID = 'baihuaben-save-term'
 const BACKEND_EXPLAIN_URL = 'http://127.0.0.1:8787/api/explain'
 const DEFAULT_MODEL = 'deepseek-chat'
+const SUPPORTED_MODELS = new Set(['deepseek-chat', 'deepseek-reasoner'])
 let storageQueue = Promise.resolve()
+
+class BackendRequestError extends Error {
+  constructor(message, code = 'request_failed', options = {}) {
+    super(message)
+    this.code = code
+    this.recoverable = Boolean(options.recoverable)
+    this.retryAfterMs = Number(options.retryAfterMs || 0)
+  }
+}
 
 function withStorageLock(operation) {
   const pending = storageQueue.then(operation, operation)
@@ -15,7 +25,7 @@ function normalizeSettings(settings = {}) {
     ? settings.hoverExplanationMode
     : 'explanation'
   return {
-    model: /^deepseek(?:-|$)/i.test(storedModel) ? storedModel : DEFAULT_MODEL,
+    model: SUPPORTED_MODELS.has(storedModel) ? storedModel : DEFAULT_MODEL,
     autoExplain: settings.autoExplain !== false,
     hoverExplanationMode,
   }
@@ -47,34 +57,54 @@ function buildTerm(term, metadata = {}, generated = {}) {
     createdAt: generated.createdAt || new Date().toISOString(),
     reviewCount: Number(generated.reviewCount || 0),
     mastered: Boolean(generated.mastered),
+    archived: Boolean(generated.archived),
+    archivedAt: String(generated.archivedAt || ''),
+    archivedCategory: generated.archived
+      ? String(generated.archivedCategory || generated.category || '未分组')
+      : '',
     status: generated.explanation ? 'ready' : 'pending',
+  }
+}
+
+function mergeTermFields(primary, fallback = {}) {
+  const explanation = String(primary.explanation || fallback.explanation || '')
+  return {
+    ...primary,
+    explanation,
+    analogy: String(primary.analogy || fallback.analogy || ''),
+    category: String(primary.category || fallback.category || '未分组'),
+    source: primary.sourceUrl ? primary.source : fallback.source || primary.source,
+    sourceUrl: primary.sourceUrl || fallback.sourceUrl || '',
+    archived: Boolean(primary.archived),
+    archivedAt: String(primary.archivedAt || ''),
+    archivedCategory: primary.archived
+      ? String(primary.archivedCategory || primary.category || fallback.archivedCategory || '未分组')
+      : '',
+    status: explanation ? 'ready' : primary.status || fallback.status || 'pending',
   }
 }
 
 function mergeSyncedTerms(incomingTerms, storedTerms) {
   const storedById = new Map(storedTerms.map((item) => [item.id, item]))
-  const storedByName = new Map(storedTerms.map((item) => [String(item.term || '').toLowerCase(), item]))
+  const storedByName = new Map()
+  for (const stored of storedTerms) {
+    const key = String(stored.term || '').trim().toLowerCase()
+    if (!key) continue
+    const existing = storedByName.get(key)
+    storedByName.set(key, existing ? mergeTermFields(existing, stored) : stored)
+  }
+  const incomingByName = new Map()
+  for (const incoming of incomingTerms) {
+    const key = String(incoming?.term || '').trim().toLowerCase()
+    if (!key) continue
+    const existing = incomingByName.get(key)
+    incomingByName.set(key, existing ? mergeTermFields(existing, incoming) : incoming)
+  }
 
-  return incomingTerms
-    .filter((item) => item?.term)
+  return [...incomingByName.values()]
     .map((incoming) => {
       const stored = storedById.get(incoming.id) || storedByName.get(String(incoming.term).toLowerCase())
-      if (!stored) return incoming
-
-      const merged = !incoming.sourceUrl && stored.sourceUrl
-        ? { ...incoming, source: stored.source || incoming.source, sourceUrl: stored.sourceUrl }
-        : incoming
-      const storedHasNewExplanation = stored.status === 'ready'
-        && Boolean(stored.explanation)
-        && (incoming.status !== 'ready' || !incoming.explanation)
-
-      return storedHasNewExplanation ? {
-        ...merged,
-        explanation: stored.explanation,
-        analogy: stored.analogy || '',
-        category: stored.category || '未分组',
-        status: 'ready',
-      } : merged
+      return mergeTermFields(incoming, stored)
     })
 }
 
@@ -87,11 +117,17 @@ async function requestExplanation(term, settings) {
       body: JSON.stringify({ term, model: normalizeSettings(settings).model }),
     })
   } catch {
-    throw new Error('无法连接白话本本机后端，请确认 npm run dev 正在运行')
+    throw new Error('无法连接加简大白话的本地服务，请检查常驻服务是否运行')
   }
   let data = {}
   try { data = await response.json() } catch { data = {} }
-  if (!response.ok || data.ok === false) throw new Error(data.error || `本机后端请求失败（${response.status}）`)
+  if (!response.ok || data.ok === false) {
+    throw new BackendRequestError(
+      data.error || `本机后端请求失败（${response.status}）`,
+      data.code,
+      { recoverable: data.recoverable, retryAfterMs: data.retryAfterMs },
+    )
+  }
   if (!data.explanation) throw new Error('后端没有返回解释')
   return {
     explanation: String(data.explanation),
@@ -105,7 +141,7 @@ async function previewTerm(rawTerm, metadata = {}) {
   const stored = await chrome.storage.local.get(['terms', 'settings'])
   const terms = Array.isArray(stored.terms) ? stored.terms : []
   const duplicate = terms.find((item) => String(item.term || '').toLowerCase() === term.toLowerCase())
-  if (duplicate?.status === 'ready' && duplicate.explanation) {
+  if (duplicate?.status === 'ready' && duplicate.explanation && duplicate.analogy) {
     return { status: 'exists', term: duplicate }
   }
 
@@ -130,16 +166,17 @@ async function savePreparedTerm(rawItem, metadata = {}) {
     const terms = Array.isArray(stored.terms) ? stored.terms : []
     const duplicate = terms.find((item) => String(item.term || '').toLowerCase() === term.toLowerCase())
     if (duplicate) {
-      const shouldComplete = duplicate.status !== 'ready' && rawItem.explanation
+      const shouldAddExplanation = !duplicate.explanation && rawItem.explanation
+      const shouldAddAnalogy = !duplicate.analogy && rawItem.analogy
+      const shouldComplete = duplicate.status !== 'ready' && (duplicate.explanation || rawItem.explanation)
       const shouldAddSource = !duplicate.sourceUrl && metadata.sourceUrl
-      const updated = shouldComplete || shouldAddSource ? {
+      const updated = shouldAddExplanation || shouldAddAnalogy || shouldComplete || shouldAddSource ? {
         ...duplicate,
-        ...(shouldComplete ? {
+        ...(shouldAddExplanation ? {
           explanation: String(rawItem.explanation),
-          analogy: String(rawItem.analogy || ''),
-          category: String(rawItem.category || '未分组'),
-          status: 'ready',
         } : {}),
+        ...(shouldAddAnalogy ? { analogy: String(rawItem.analogy) } : {}),
+        ...(shouldComplete ? { status: 'ready' } : {}),
         ...(shouldAddSource ? { source: metadata.source, sourceUrl: metadata.sourceUrl } : {}),
       } : duplicate
       if (updated !== duplicate) {
@@ -148,7 +185,7 @@ async function savePreparedTerm(rawItem, metadata = {}) {
       return { status: 'exists', term: updated }
     }
 
-    const item = buildTerm(term, metadata, rawItem)
+    const item = buildTerm(term, metadata, { ...rawItem, category: '未分组' })
     await chrome.storage.local.set({ terms: [item, ...terms] })
     return { status: item.status === 'ready' ? 'saved' : 'pending', term: item }
   })
@@ -182,7 +219,7 @@ chrome.runtime.onInstalled.addListener(async () => {
   await chrome.contextMenus.removeAll()
   chrome.contextMenus.create({
     id: MENU_ID,
-    title: '解释并收进白话本：“%s”',
+    title: '解释并加入个人术语库：“%s”',
     contexts: ['selection'],
   })
 
@@ -190,7 +227,7 @@ chrome.runtime.onInstalled.addListener(async () => {
   const webTabs = tabs.filter((tab) => tab.id && /^https?:/i.test(tab.url || ''))
   await Promise.allSettled(webTabs.flatMap((tab) => [
     chrome.scripting.insertCSS({ target: { tabId: tab.id }, files: ['content.css'] }),
-    chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] }),
+    chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['term-data.js', 'content.js'] }),
   ]))
 })
 
@@ -224,6 +261,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   operation
     .then((result) => sendResponse({ ok: true, ...(result || {}) }))
-    .catch((error) => sendResponse({ ok: false, error: error.message }))
+    .catch((error) => sendResponse({
+      ok: false,
+      error: error.message,
+      code: error.code || 'request_failed',
+      recoverable: Boolean(error.recoverable),
+      retryAfterMs: Number(error.retryAfterMs || 0),
+    }))
   return true
 })

@@ -21,9 +21,11 @@ const localGlossary = {
 }
 
 export class ApiClientError extends Error {
-  constructor(message, code = 'request_failed') {
+  constructor(message, code = 'request_failed', options = {}) {
     super(message)
     this.code = code
+    this.recoverable = Boolean(options.recoverable)
+    this.retryAfterMs = Number(options.retryAfterMs || 0)
   }
 }
 
@@ -35,13 +37,17 @@ async function requestApi(path, options = {}) {
       headers: options.body ? { 'Content-Type': 'application/json', ...options.headers } : options.headers,
     })
   } catch {
-    throw new ApiClientError('无法连接白话本本机后端，请确认 npm run dev 正在运行', 'backend_unreachable')
+    throw new ApiClientError('无法连接加简大白话的本地服务，请检查常驻服务是否运行', 'backend_unreachable')
   }
 
   let data
   try { data = await response.json() } catch { data = {} }
   if (!response.ok || data.ok === false) {
-    throw new ApiClientError(data.error || `本机后端请求失败（${response.status}）`, data.code)
+    throw new ApiClientError(
+      data.error || `本机后端请求失败（${response.status}）`,
+      data.code,
+      { recoverable: data.recoverable, retryAfterMs: data.retryAfterMs },
+    )
   }
   return data
 }
@@ -50,15 +56,15 @@ export function getLocalExplanation(term) {
   return localGlossary[term.trim().toLowerCase()] ?? null
 }
 
-export async function getBackendStatus(signal) {
-  return requestApi('/health', { signal })
+export async function getBackendStatus(signal, probe = false) {
+  return requestApi(`/health${probe ? '?probe=1' : ''}`, { signal })
 }
 
 export async function fetchProviderModels(_settings, signal) {
   const provider = getProvider()
   const data = await requestApi('/models', { signal })
   const modelIds = Array.isArray(data.models)
-    ? data.models.map((model) => String(model || '')).filter((model) => /^deepseek(?:-|$)/i.test(model))
+    ? data.models.map((model) => String(model || '')).filter((model) => provider.fallbackModels.includes(model))
     : []
   const uniqueModels = [...new Set(modelIds.length ? modelIds : provider.fallbackModels)]
   return uniqueModels.sort((a, b) => {
@@ -90,19 +96,36 @@ function localCategory(term) {
   return term.category === '未分组' ? '其他技术概念' : term.category
 }
 
-export function organizeLocally(terms) {
-  return terms.map((term) => ({ ...term, category: localCategory(term) }))
+export function organizeLocally(terms, mode = 'incremental') {
+  return terms.map((term) => (
+    mode === 'all' || term.category === '未分组'
+      ? { ...term, category: localCategory({ ...term, category: '未分组' }) }
+      : term
+  ))
 }
 
-export async function organizeWithAi(terms, settings) {
+export async function organizeWithAi(terms, settings, mode = 'incremental', groups = []) {
+  const candidates = mode === 'all'
+    ? terms
+    : terms.filter((term) => term.category === '未分组')
+  if (!candidates.length) return terms
+  const existingCategories = [...new Set([
+    ...groups,
+    ...terms.map((term) => term.category),
+  ].filter((category) => category && category !== '未分组'))]
   const data = await requestApi('/organize', {
     method: 'POST',
     body: JSON.stringify({
       model: settings.model,
-      terms: terms.map(({ id, term, explanation }) => ({ id, term, explanation })),
+      mode,
+      existingCategories,
+      terms: candidates.map(({ id, term, explanation }) => ({ id, term, explanation })),
     }),
   })
-  const assignments = new Map((data.assignments || []).map((item) => [item.id, item.category]))
+  const candidateIds = new Set(candidates.map((term) => term.id))
+  const assignments = new Map((data.assignments || [])
+    .filter((item) => candidateIds.has(item.id) && item.category)
+    .map((item) => [item.id, String(item.category)]))
   return terms.map((term) => ({ ...term, category: assignments.get(term.id) || term.category }))
 }
 
