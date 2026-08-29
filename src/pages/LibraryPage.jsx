@@ -100,10 +100,19 @@ export default function LibraryPage({
     <main className="page library-page">
       <header className="page-heading">
         <div>
-          <h1>{isArchiveView ? '归档' : '把陌生词，讲成人话。'}</h1>
-          <p>{isArchiveView ? '已经熟悉的术语收在这里，需要时可以恢复。' : '遇到看不懂的技术词，先存下来，理解可以慢慢发生。'}</p>
+          <h1>{isArchiveView ? '归档' : '你的个人术语库'}</h1>
+          {isArchiveView ? <p>已经熟悉的术语收在这里，需要时可以恢复。</p> : null}
         </div>
-        <div className="profile-avatar" aria-label="本地个人术语库">本地</div>
+        <a
+          aria-label="打开加简大白话的 B 站主页"
+          className="profile-avatar"
+          href="https://space.bilibili.com/1469658337?spm_id_from=333.1007.0.0"
+          rel="noreferrer"
+          target="_blank"
+          title="加简大白话的 B 站主页"
+        >
+          <img alt="" src="/plainify-avatar.png" />
+        </a>
       </header>
 
       {!isArchiveView ? (

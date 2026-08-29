@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>加简大白话 · Plainify｜你的个人术语库</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <span class="mark" aria-hidden="true"></span>
+      <strong>加简大白话 <small>· Plainify</small></strong>
+      <button id="open-app" type="button">打开术语库</button>
+    </header>
+    <main>
+      <section id="query-view">
+        <label for="term">想查询的术语</label>
+        <textarea id="term" maxlength="120" placeholder="先在网页里选中术语，或在这里输入"></textarea>
+        <button class="primary-action" id="explain" type="button">生成解释</button>
+        <p class="status" id="query-status" aria-live="polite"></p>
+      </section>
+      <section hidden id="result-view">
+        <div class="result-heading">
+          <span>最新查询</span>
+          <button id="clear" type="button">清空</button>
+        </div>
+        <h1 id="result-term"></h1>
+        <div class="explanation-block">
+          <strong>大白话解释</strong>
+          <p id="plain-explanation"></p>
+        </div>
+        <div class="explanation-block analogy">
+          <strong>生活化类比</strong>
+          <p id="analogy"></p>
+        </div>
+        <p class="status" id="result-status" aria-live="polite"></p>
+        <button class="primary-action" id="add-to-library" type="button">加入术语库</button>
+      </section>
+    </main>
+    <footer><span id="backend-dot" aria-hidden="true"></span><span id="backend-status">正在检查本机服务…</span></footer>
+    <script src="popup.js"></script>
+  </body>
+</html>

@@ -2,52 +2,51 @@ import assert from 'node:assert/strict'
 import { mergeExtensionTerms } from '../src/data/termSync.js'
 
 const websiteTerm = {
-  id: 'website-bash',
-  term: 'bash',
-  explanation: 'bash 是输入命令的程序。',
-  analogy: '',
-  category: '命令行',
-  source: '手动输入',
+  id: 'website-id',
+  term: 'Context window',
+  explanation: '模型一次能参考的内容范围。',
+  analogy: '像桌面能摊开的资料数量。',
+  category: '大模型基础',
+  source: '来自网站',
   sourceUrl: '',
   status: 'ready',
+  archived: false,
+  archivedAt: '',
+  archivedCategory: '',
+  mastered: false,
 }
-const extensionTerm = {
+
+const archivedFromExtension = {
   ...websiteTerm,
-  id: 'extension-bash',
-  analogy: '像通过聊天窗口给电脑派任务。',
-  source: '测试网页',
-  sourceUrl: 'https://example.com/bash',
-}
-
-const completed = mergeExtensionTerms([websiteTerm], [extensionTerm])
-assert.equal(completed.length, 1)
-assert.equal(completed[0].id, 'website-bash')
-assert.equal(completed[0].analogy, extensionTerm.analogy)
-assert.equal(completed[0].sourceUrl, extensionTerm.sourceUrl)
-assert.equal(completed[0].category, '命令行')
-
-const richWebsiteTerms = [completed[0]]
-const unchanged = mergeExtensionTerms(richWebsiteTerms, [{ ...extensionTerm, analogy: '' }])
-assert.equal(unchanged, richWebsiteTerms)
-assert.equal(unchanged[0].analogy, extensionTerm.analogy)
-
-const deduplicated = mergeExtensionTerms([
-  websiteTerm,
-  { ...websiteTerm, id: 'duplicate-bash', analogy: extensionTerm.analogy },
-], [])
-assert.equal(deduplicated.length, 1)
-assert.equal(deduplicated[0].analogy, extensionTerm.analogy)
-
-const archivedWebsiteTerm = {
-  ...completed[0],
+  id: 'extension-id',
   archived: true,
-  archivedCategory: '命令行',
+  archivedAt: '2026-08-28T08:00:00.000Z',
+  archivedCategory: '大模型基础',
+  mastered: true,
 }
-const archivePreserved = mergeExtensionTerms([archivedWebsiteTerm], [{ ...extensionTerm, archived: false }])
-assert.equal(archivePreserved[0].archived, true)
-assert.equal(archivePreserved[0].archivedCategory, '命令行')
 
-console.log('PASS website fills missing analogy from extension without overwriting existing fields')
-console.log('PASS stale empty analogy cannot replace a complete website term')
-console.log('PASS duplicate website terms collapse into one complete record')
-console.log('PASS stale extension state cannot restore an archived website term')
+const [mergedArchive] = mergeExtensionTerms([websiteTerm], [archivedFromExtension])
+assert.equal(mergedArchive.id, websiteTerm.id)
+assert.equal(mergedArchive.archived, true)
+assert.equal(mergedArchive.archivedAt, archivedFromExtension.archivedAt)
+assert.equal(mergedArchive.archivedCategory, '大模型基础')
+assert.equal(mergedArchive.mastered, true)
+
+const [keptWebsiteArchive] = mergeExtensionTerms(
+  [archivedFromExtension],
+  [{ ...websiteTerm, archived: false, archivedAt: '', archivedCategory: '' }],
+)
+assert.equal(keptWebsiteArchive.archived, true)
+assert.equal(keptWebsiteArchive.archivedAt, archivedFromExtension.archivedAt)
+assert.equal(keptWebsiteArchive.archivedCategory, '大模型基础')
+
+const [deduplicatedArchive] = mergeExtensionTerms([websiteTerm], [
+  websiteTerm,
+  archivedFromExtension,
+])
+assert.equal(deduplicatedArchive.archived, true)
+assert.equal(deduplicatedArchive.archivedAt, archivedFromExtension.archivedAt)
+
+console.log('PASS extension archive state is applied to an existing website term')
+console.log('PASS stale active extension data cannot restore a website archive')
+console.log('PASS duplicate extension terms preserve the archived copy')

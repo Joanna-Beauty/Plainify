@@ -1,6 +1,6 @@
 import { getProvider } from '../data/modelProviders'
 
-const API_BASE_URL = 'http://127.0.0.1:8787/api'
+const API_BASE_URL = String(import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8787/api').replace(/\/$/, '')
 
 const localGlossary = {
   webhook: {
@@ -36,7 +36,8 @@ async function requestApi(path, options = {}) {
       ...options,
       headers: options.body ? { 'Content-Type': 'application/json', ...options.headers } : options.headers,
     })
-  } catch {
+  } catch (error) {
+    if (error.name === 'AbortError') throw error
     throw new ApiClientError('无法连接加简大白话的本地服务，请检查常驻服务是否运行', 'backend_unreachable')
   }
 
@@ -60,11 +61,42 @@ export async function getBackendStatus(signal, probe = false) {
   return requestApi(`/health${probe ? '?probe=1' : ''}`, { signal })
 }
 
-export async function fetchProviderModels(_settings, signal) {
-  const provider = getProvider()
-  const data = await requestApi('/models', { signal })
+export async function getAiProviders(signal) {
+  return requestApi('/ai/providers', { signal })
+}
+
+export async function saveProviderCredential(providerId, apiKey, model = '', baseUrl = '') {
+  return requestApi(`/ai/providers/${encodeURIComponent(providerId)}/credentials`, {
+    method: 'POST',
+    body: JSON.stringify({ apiKey, model, baseUrl }),
+  })
+}
+
+export async function deleteProviderCredential(providerId) {
+  return requestApi(`/ai/providers/${encodeURIComponent(providerId)}/credentials`, {
+    method: 'DELETE',
+  })
+}
+
+export async function activateProvider(providerId, model) {
+  return requestApi('/ai/active', {
+    method: 'PUT',
+    body: JSON.stringify({ provider: providerId, model }),
+  })
+}
+
+export async function fetchProviderModels(settings = {}, signal) {
+  const provider = getProvider(settings.provider)
+  const data = await requestApi(`/ai/providers/${encodeURIComponent(provider.id)}/models`, {
+    method: 'POST',
+    body: JSON.stringify({
+      apiKey: String(settings.apiKey || '').trim(),
+      baseUrl: String(settings.baseUrl || provider.baseUrl).trim(),
+    }),
+    signal,
+  })
   const modelIds = Array.isArray(data.models)
-    ? data.models.map((model) => String(model || '')).filter((model) => provider.fallbackModels.includes(model))
+    ? data.models.map((model) => String(model || '')).filter(Boolean)
     : []
   const uniqueModels = [...new Set(modelIds.length ? modelIds : provider.fallbackModels)]
   return uniqueModels.sort((a, b) => {
@@ -74,10 +106,14 @@ export async function fetchProviderModels(_settings, signal) {
   })
 }
 
+export async function openLocalConfigFile() {
+  return requestApi('/settings/open-config', { method: 'POST' })
+}
+
 export async function explainTerm(term, settings) {
   const data = await requestApi('/explain', {
     method: 'POST',
-    body: JSON.stringify({ term, model: settings.model }),
+    body: JSON.stringify({ term, provider: settings.provider, model: settings.model }),
   })
   return {
     explanation: String(data.explanation || ''),
@@ -117,6 +153,7 @@ export async function organizeWithAi(terms, settings, mode = 'incremental', grou
     method: 'POST',
     body: JSON.stringify({
       model: settings.model,
+      provider: settings.provider,
       mode,
       existingCategories,
       terms: candidates.map(({ id, term, explanation }) => ({ id, term, explanation })),
@@ -130,7 +167,8 @@ export async function organizeWithAi(terms, settings, mode = 'incremental', grou
 }
 
 export async function testAiConnection(settings) {
-  const data = await requestApi('/test', {
+  const provider = getProvider(settings.provider)
+  const data = await requestApi(`/ai/providers/${encodeURIComponent(provider.id)}/test`, {
     method: 'POST',
     body: JSON.stringify({ model: settings.model }),
   })

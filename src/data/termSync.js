@@ -8,12 +8,33 @@ function fillMissingFields(primary, fallback) {
   const sourceUrl = primary.sourceUrl || fallback.sourceUrl || ''
   const source = primary.sourceUrl ? primary.source : fallback.source || primary.source
   const status = explanation ? 'ready' : primary.status
+  const archived = primary.archived === true || fallback.archived === true
+  const archivedAt = archived ? String(primary.archivedAt || fallback.archivedAt || '') : ''
+  const archivedCategory = archived
+    ? String(primary.archivedCategory || fallback.archivedCategory || primary.category || fallback.category || '未分组')
+    : ''
+  const mastered = archived ? true : Boolean(primary.mastered)
   if (explanation === primary.explanation
     && analogy === primary.analogy
     && sourceUrl === primary.sourceUrl
     && source === primary.source
-    && status === primary.status) return primary
-  return { ...primary, explanation, analogy, source, sourceUrl, status }
+    && status === primary.status
+    && archived === primary.archived
+    && archivedAt === primary.archivedAt
+    && archivedCategory === primary.archivedCategory
+    && mastered === primary.mastered) return primary
+  return {
+    ...primary,
+    explanation,
+    analogy,
+    source,
+    sourceUrl,
+    status,
+    archived,
+    archivedAt,
+    archivedCategory,
+    mastered,
+  }
 }
 
 export function mergeExtensionTerms(currentTerms, incomingTerms) {

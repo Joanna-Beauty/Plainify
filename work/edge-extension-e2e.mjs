@@ -336,15 +336,88 @@ try {
   assert.deepEqual(duplicateHighlights.analogies, [savedPreview.analogy, savedPreview.analogy])
   console.log('STEP inline selection confirmed and highlighted')
 
-  await evaluate(worker, `chrome.storage.local.get('terms').then(({ terms }) => chrome.storage.local.set({
-    terms: (terms || []).map((item) => item.term === 'Context window'
-      ? { ...item, archived: true, archivedCategory: item.category || '未分组' }
-      : item),
-  }))`)
+  const highlightRect = await evaluate(reader, `(() => {
+    const mark = [...document.querySelectorAll('.baihuaben-highlight')]
+      .find((item) => item.textContent === 'Context window')
+    const rect = mark.getBoundingClientRect()
+    return { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+  })()`)
+  await reader.send('Input.dispatchMouseEvent', {
+    type: 'mouseMoved',
+    x: highlightRect.x + highlightRect.width / 2,
+    y: highlightRect.y + highlightRect.height / 2,
+  })
+  const highlightHoverState = await waitFor(
+    () => evaluate(reader, `(() => {
+      const mark = [...document.querySelectorAll('.baihuaben-highlight')]
+        .find((item) => item.textContent === 'Context window')
+      const icon = getComputedStyle(mark, '::after').content
+      return icon.includes('💡') ? {
+        icon,
+        cursor: getComputedStyle(mark).cursor,
+        tooltipPinned: document.querySelector('#baihuaben-tooltip')?.dataset.pinned,
+      } : null
+    })()`),
+    '黄色高亮悬停灯泡',
+  )
+  assert.equal(highlightHoverState.cursor, 'pointer')
+  assert.equal(highlightHoverState.icon.includes('?'), false)
+  assert.equal(highlightHoverState.tooltipPinned, 'false')
+
+  await evaluate(reader, `(() => {
+    const mark = [...document.querySelectorAll('.baihuaben-highlight')]
+      .find((item) => item.textContent === 'Context window')
+    mark.click()
+    mark.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }))
+  })()`)
+  const pinnedTooltip = await waitFor(
+    () => evaluate(reader, `(() => {
+      const tip = document.querySelector('#baihuaben-tooltip')
+      if (tip?.style.display !== 'block' || tip.dataset.pinned !== 'true') return null
+      return {
+        role: tip.getAttribute('role'),
+        text: tip.innerText,
+        closeLabel: tip.querySelector('[data-action="close"]')?.getAttribute('aria-label'),
+        archiveText: tip.querySelector('[data-action="archive"]')?.textContent,
+      }
+    })()`),
+    '点击后固定解释栏',
+  )
+  assert.equal(pinnedTooltip.role, 'dialog')
+  assert.equal(pinnedTooltip.closeLabel, '关闭解释栏')
+  assert.equal(pinnedTooltip.archiveText, '归档术语')
+  assert.ok(pinnedTooltip.text.includes(savedPreview.explanation))
+  await new Promise((resolve) => setTimeout(resolve, 800))
+  assert.equal(
+    await evaluate(reader, `document.querySelector('#baihuaben-tooltip')?.style.display`),
+    'block',
+  )
+  const pinnedTooltipScreenshot = await capture(reader, 'baihuaben-edge-pinned-tooltip.png')
+  await evaluate(reader, `document.querySelector('#baihuaben-tooltip [data-action="close"]').click()`)
   await waitFor(
-    () => evaluate(reader, `[...document.querySelectorAll('.baihuaben-highlight')]
-      .every((item) => item.textContent !== 'Context window')`),
-    '归档后移除黄色高亮',
+    () => evaluate(reader, `document.querySelector('#baihuaben-tooltip')?.style.display === 'none'`),
+    '关闭固定解释栏',
+  )
+
+  await evaluate(reader, `(() => {
+    const mark = [...document.querySelectorAll('.baihuaben-highlight')]
+      .find((item) => item.textContent === 'Context window')
+    mark.click()
+    document.querySelector('#baihuaben-tooltip [data-action="archive"]').click()
+  })()`)
+  const archivedTerm = await waitFor(
+    () => evaluate(worker, `chrome.storage.local.get('terms').then(({ terms }) => {
+      const item = (terms || []).find((term) => term.term === 'Context window')
+      return item?.archived === true && item.archivedAt && item.archivedCategory ? item : null
+    })`),
+    '从固定解释栏归档术语',
+  )
+  assert.equal(archivedTerm.archivedCategory, archivedTerm.category || '未分组')
+  await waitFor(
+    () => evaluate(reader, `document.querySelector('#baihuaben-tooltip')?.style.display === 'none'
+      && [...document.querySelectorAll('.baihuaben-highlight')]
+        .every((item) => item.textContent !== 'Context window')`),
+    '归档后关闭解释栏并移除当前页同名高亮',
   )
   assert.equal(
     await evaluate(reader, `[...document.querySelectorAll('.baihuaben-highlight')]
@@ -361,7 +434,7 @@ try {
       .filter((item) => item.textContent === 'Context window').length === 2`),
     '恢复后重新显示黄色高亮',
   )
-  console.log('STEP archive removed highlights and restore added them back')
+  console.log('STEP pinned tooltip close and archive flow updated the current page immediately')
 
   await evaluate(reader, `(() => {
     const mark = [...document.querySelectorAll('.baihuaben-highlight')]
@@ -630,32 +703,88 @@ try {
     return true
   })()`)
   assert.equal(settingsState, true)
-  const settings = await waitFor(
+  await waitFor(
+    () => evaluate(app, `Boolean(document.querySelector('[data-settings-tab="general"]'))`),
+    '设置默认进入通用设置',
+  )
+  await evaluate(app, `[...document.querySelectorAll('.settings-tabs button')]
+    .find((button) => button.textContent.trim() === '模型').click()`)
+  await waitFor(
+    () => evaluate(app, `Boolean(document.querySelector('[data-settings-tab="model"] .provider-summary'))`),
+    '已配置提供方卡片',
+  )
+  await evaluate(app, `document.querySelector('[data-settings-tab="model"] .provider-summary button').click()`)
+  await waitFor(
+    () => evaluate(app, `Boolean(document.querySelector('.provider-editor[data-editor-mode="edit"]'))`),
+    '已配置提供方编辑器',
+  )
+  await evaluate(app, `document.querySelector('.provider-editor .custom-settings-toggle').click()`)
+  const modelSettings = await waitFor(
     () => evaluate(app, `(() => {
-      const select = document.querySelector('select')
-      const modelStatus = document.querySelector('.model-status')?.textContent || ''
-      if (!document.body.innerText.includes('本机 DeepSeek 服务')
-        || !select || select.disabled || !modelStatus.includes('获取到')) return null
+      const editor = document.querySelector('.provider-editor[data-editor-mode="edit"]')
+      if (!document.querySelector('[data-settings-tab="model"]') || !editor) return null
+      const urlInput = document.querySelector('.adapter-url-field input')
       return {
-        options: [...select.options].map((option) => option.value),
-        modelStatus,
-        hoverLabels: [...document.querySelectorAll('.segmented-control button')].map((button) => button.textContent.trim()),
-        activeHoverLabel: document.querySelector('.segmented-control button[aria-pressed="true"]')?.textContent.trim() || '',
-        hasUrlInput: [...document.querySelectorAll('input')].some((input) => /url/i.test(input.name + input.placeholder)),
-        hasProviderSelect: document.body.innerText.includes('OpenAI') || document.body.innerText.includes('Anthropic'),
+        configuredProviders: [...document.querySelectorAll('.provider-summary')]
+          .map((item) => item.dataset.providerId),
+        adapter: document.querySelector('.provider-editor-title span')?.textContent.trim(),
+        models: [...document.querySelectorAll('.model-catalog-row')].map((item) => item.dataset.modelId),
+        hasKeyInput: Boolean(document.querySelector('input[name="deepseekApiKey"]')),
+        apiUrl: urlInput?.value,
+        apiUrlReadOnly: urlInput?.readOnly,
+        hasCustomProviderButton: document.body.innerText.includes('添加自定义提供方'),
       }
     })()`),
-    'DeepSeek 设置页',
+    '模型设置页',
   )
-  assert.ok(settings.options.length > 0)
-  assert.ok(settings.options.every((model) => /^deepseek(?:-|$)/i.test(model)))
-  assert.deepEqual([...settings.options].sort(), [...expectedModels].sort())
-  assert.deepEqual(settings.hoverLabels, ['大白话解释', '生活化类比', '全部展示'])
-  assert.equal(settings.activeHoverLabel, '大白话解释')
-  assert.equal(settings.hasUrlInput, false)
-  assert.equal(settings.hasProviderSelect, false)
-  assert.equal(await evaluate(app, `[...document.querySelectorAll('input')]
-    .some((input) => /key/i.test(input.name + input.placeholder))`), false)
+  assert.deepEqual(modelSettings.configuredProviders, ['deepseek'])
+  assert.equal(modelSettings.adapter, 'deepseek-official')
+  assert.equal(modelSettings.models.includes('deepseek-chat'), false)
+  assert.equal(modelSettings.hasKeyInput, true)
+  assert.equal(modelSettings.apiUrl, 'https://api.deepseek.com/v1')
+  assert.equal(modelSettings.apiUrlReadOnly, true)
+  assert.equal(modelSettings.hasCustomProviderButton, false)
+
+  await evaluate(app, `[...document.querySelectorAll('button')]
+    .find((button) => button.textContent.trim() === '获取可用模型').click()`)
+  const availableModels = await waitFor(
+    () => evaluate(app, `(() => {
+      const dialog = document.querySelector('.model-discovery-dialog')
+      if (!dialog) return null
+      return [...dialog.querySelectorAll('.model-discovery-list label span')].map((item) => item.textContent.trim())
+    })()`),
+    '可用模型选择弹窗',
+  )
+  const initialModels = new Set(modelSettings.models)
+  assert.deepEqual(
+    [...availableModels].sort(),
+    expectedModels.filter((model) => model !== 'deepseek-chat' && !initialModels.has(model)).sort(),
+  )
+  if (availableModels.length) {
+    await evaluate(app, `document.querySelector('.model-discovery-dialog .primary-button').click()`)
+    const expectedCatalogSize = new Set([...initialModels, ...availableModels]).size
+    await waitFor(
+      () => evaluate(app, `[...document.querySelectorAll('.model-catalog-row')].length === ${expectedCatalogSize}`),
+      '所选模型加入目录',
+    )
+  } else {
+    await evaluate(app, `document.querySelector('button[aria-label="关闭模型选择"]').click()`)
+  }
+
+  await evaluate(app, `[...document.querySelectorAll('.settings-tabs button')]
+    .find((button) => button.textContent.trim() === '通用设置').click()`)
+  const generalSettings = await waitFor(
+    () => evaluate(app, `(() => {
+      if (!document.querySelector('[data-settings-tab="general"]')) return null
+      return {
+        hoverLabels: [...document.querySelectorAll('.segmented-control button')].map((button) => button.textContent.trim()),
+        activeHoverLabel: document.querySelector('.segmented-control button[aria-pressed="true"]')?.textContent.trim() || '',
+      }
+    })()`),
+    '通用设置页',
+  )
+  assert.deepEqual(generalSettings.hoverLabels, ['大白话解释', '生活化类比', '全部展示'])
+  assert.equal(generalSettings.activeHoverLabel, '大白话解释')
   console.log('STEP settings page loaded')
 
   await evaluate(app, `(() => {
@@ -667,7 +796,7 @@ try {
       ?.textContent.trim() === '生活化类比'`),
     '生活化类比选项选中',
   )
-  await evaluate(app, `document.querySelector('.settings-form button[type="submit"]').click()`)
+  await evaluate(app, `document.querySelector('.general-settings-form button[type="submit"]').click()`)
   await waitFor(
     () => evaluate(worker, `chrome.storage.local.get('settings').then(({ settings }) =>
       settings?.hoverExplanationMode === 'analogy')`),
@@ -696,7 +825,7 @@ try {
       ?.textContent.trim() === '全部展示'`),
     '全部展示选项选中',
   )
-  await evaluate(app, `document.querySelector('.settings-form button[type="submit"]').click()`)
+  await evaluate(app, `document.querySelector('.general-settings-form button[type="submit"]').click()`)
   await waitFor(
     () => evaluate(worker, `chrome.storage.local.get('settings').then(({ settings }) =>
       settings?.hoverExplanationMode === 'both')`),
@@ -717,6 +846,41 @@ try {
   const hoverModesScreenshot = await capture(reader, 'baihuaben-edge-hover-both.png')
   console.log('STEP hover explanation modes synchronized and rendered')
   const appScreenshot = await capture(app, 'baihuaben-edge-app-connected.png')
+
+  await evaluate(reader, `(() => {
+    const mark = [...document.querySelectorAll('.baihuaben-highlight')]
+      .find((item) => item.textContent === 'Context window')
+    mark.click()
+    document.querySelector('#baihuaben-tooltip [data-action="archive"]').click()
+  })()`)
+  const websiteArchivedTerm = await waitFor(
+    () => evaluate(app, `(() => {
+      const item = JSON.parse(localStorage.getItem('baihuaben:terms:v1') || '[]')
+        .find((term) => term.term === 'Context window')
+      return item?.archived === true && item.mastered === true
+        && item.archivedAt && item.archivedCategory ? item : null
+    })()`),
+    '悬浮解释栏归档同步到网站归档库',
+  )
+  assert.equal(websiteArchivedTerm.archivedCategory, websiteArchivedTerm.category || '未分组')
+  await waitFor(
+    () => evaluate(reader, `[...document.querySelectorAll('.baihuaben-highlight')]
+      .every((item) => item.textContent !== 'Context window')`),
+    '网站联动归档后当前阅读页移除高亮',
+  )
+  await evaluate(app, `document.querySelector('button[aria-label="关闭设置"]')?.click()`)
+  await waitFor(
+    () => evaluate(app, `Boolean(document.querySelector('.library-page .archive-entry'))`),
+    '返回网站术语库',
+  )
+  await evaluate(app, `document.querySelector('.library-page .archive-entry').click()`)
+  await waitFor(
+    () => evaluate(app, `[...document.querySelectorAll('.archive-list .term-name')]
+      .some((item) => item.textContent.trim() === 'Context window')`),
+    '归档术语显示在网站归档列表',
+  )
+  const archiveLibraryScreenshot = await capture(app, 'baihuaben-edge-archive-synced.png')
+  console.log('STEP floating-panel archive synchronized into the website archive library')
 
   await evaluate(worker, `chrome.storage.local.remove('popupPreview')`)
   const popupTargetId = await createTarget(browser, `chrome-extension://${extensionId}/popup.html`)
@@ -818,7 +982,13 @@ try {
       previewSurvivesBackgroundScroll: true,
       dismissWithoutSave: true,
       confirmedSaveAndHighlight: true,
-      archiveRemovesHighlights: true,
+      hoverLightBulb: true,
+      clickPinsTooltip: true,
+      pinnedTooltipSurvivesMouseout: true,
+      pinnedTooltipCanClose: true,
+      archiveFromPinnedTooltip: true,
+      archiveClosesTooltipAndRemovesHighlights: true,
+      archiveSynchronizesToWebsiteLibrary: true,
       restoreAddsHighlightsBack: true,
       hoverTooltip: true,
       duplicateHighlightsShareCompleteData: true,
@@ -835,9 +1005,17 @@ try {
       popupPreviewPersistsBeforeSave: true,
       popupConfirmSaveAndClear: true,
       hoverExplanationModes: true,
-      deepSeekOnlySettings: true,
+      providerSettingsTabs: true,
     },
-    screenshots: [previewScreenshot, readerScreenshot, hoverModesScreenshot, appScreenshot, popupScreenshot],
+    screenshots: [
+      previewScreenshot,
+      pinnedTooltipScreenshot,
+      readerScreenshot,
+      hoverModesScreenshot,
+      appScreenshot,
+      archiveLibraryScreenshot,
+      popupScreenshot,
+    ],
   }, null, 2))
 } finally {
   for (const client of clients.reverse()) client.close()

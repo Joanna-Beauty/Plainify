@@ -170,6 +170,7 @@ async function run() {
     autoExplain: true,
     hoverExplanationMode: 'both',
     model: 'deepseek-reasoner',
+    provider: 'deepseek',
   })
 
   const previewPromise = sendToBackground({
@@ -252,7 +253,8 @@ async function run() {
   assert.deepEqual(storage.settings, {
     autoExplain: true,
     hoverExplanationMode: 'analogy',
-    model: 'deepseek-chat',
+    model: 'gpt-5',
+    provider: 'openai',
   })
   assert.ok(appMessages.some((message) => (
     message.source === 'baihuaben-extension'
@@ -260,11 +262,28 @@ async function run() {
       && message.terms?.some((item) => item.status === 'ready')
   )))
 
+  const archived = await sendToBackground({
+    type: 'ARCHIVE_TERM',
+    id: storage.terms[0].id,
+    term: storage.terms[0].term,
+  })
+  await flush()
+  assert.equal(archived.term.archived, true)
+  assert.equal(archived.term.mastered, true)
+  assert.ok(archived.term.archivedAt)
+  assert.equal(archived.term.archivedCategory, archived.term.category)
+  assert.ok(appMessages.some((message) => (
+    message.source === 'baihuaben-extension'
+      && message.type === 'TERMS_CHANGED'
+      && message.terms?.some((item) => item.id === archived.term.id && item.archived === true)
+  )))
+
   console.log('PASS explanation preview does not save until SAVE_TERM is confirmed')
   console.log('PASS stale website sync cannot overwrite a saved explanation or source URL')
   console.log('PASS stale ready terms cannot overwrite a saved analogy with an empty value')
   console.log('PASS explanation, analogy, and hover settings survive synchronization')
-  console.log('PASS legacy API Key, provider, and base URL are removed from extension storage')
+  console.log('PASS legacy API Key and base URL are removed while provider selection remains available')
+  console.log('PASS floating-panel archive reaches website sync with mastered archive metadata')
 }
 
 run().catch((error) => {

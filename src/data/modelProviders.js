@@ -1,1 +1,7 @@
-export { deepSeekProvider, getProvider, normalizeProviderSettings } from './providers'
+export {
+  deepSeekProvider,
+  getProvider,
+  modelProviders,
+  normalizeProviderSettings,
+  openAiProvider,
+} from './providers'

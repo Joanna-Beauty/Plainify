@@ -1,12 +1,32 @@
 import http from 'node:http'
+import fs from 'node:fs/promises'
 import path from 'node:path'
+import { spawn } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 
 const HOST = '127.0.0.1'
 const DEFAULT_PORT = 8787
-const DEEPSEEK_BASE_URL = String(process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com/v1').replace(/\/$/, '')
-const DEFAULT_MODEL = 'deepseek-chat'
-const FALLBACK_MODELS = ['deepseek-chat', 'deepseek-reasoner']
+const PROVIDERS = {
+  deepseek: {
+    id: 'deepseek',
+    name: 'DeepSeek',
+    envKey: 'DEEPSEEK_API_KEY',
+    baseUrlEnvKey: 'DEEPSEEK_BASE_URL',
+    defaultBaseUrl: 'https://api.deepseek.com/v1',
+    defaultModel: 'deepseek-chat',
+    fallbackModels: ['deepseek-chat', 'deepseek-reasoner'],
+  },
+  openai: {
+    id: 'openai',
+    name: 'OpenAI',
+    envKey: 'OPENAI_API_KEY',
+    baseUrlEnvKey: 'OPENAI_BASE_URL',
+    defaultBaseUrl: 'https://api.openai.com/v1',
+    defaultModel: 'gpt-4o-mini',
+    fallbackModels: ['gpt-4o-mini', 'gpt-4.1-mini', 'gpt-4.1', 'gpt-4o'],
+  },
+}
+const DEFAULT_PROVIDER = 'deepseek'
 const MAX_BODY_BYTES = 128 * 1024
 const LOCAL_WEB_ORIGIN = /^http:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?$/i
 const EXTENSION_ORIGIN = /^chrome-extension:\/\/[a-p]{32}$/i
@@ -22,17 +42,20 @@ function recoveryDelays() {
   return configured.length ? configured : DEFAULT_RECOVERY_DELAYS_MS
 }
 
-let providerState = {
+const providerStates = Object.fromEntries(Object.values(PROVIDERS).map((provider) => [provider.id, {
   status: 'unknown',
-  code: 'deepseek_not_checked',
-  message: '正在检查 DeepSeek 真实连接状态',
+  code: `${provider.id}_not_checked`,
+  message: `正在检查 ${provider.name} 真实连接状态`,
   checkedAt: null,
   recoverable: true,
-}
+}]))
 let recoveryTimer = null
 let recoveryAttempt = 0
 let nextRecoveryAt = 0
 let providerProbePromise = null
+let recoveryProviderId = DEFAULT_PROVIDER
+let configFilePath = path.resolve(process.env.BAIHUABEN_ENV_FILE || '.env.local')
+let configWriteQueue = Promise.resolve()
 
 class ApiError extends Error {
   constructor(status, message, code = 'request_failed', options = {}) {
@@ -55,24 +78,59 @@ function clearRecoverySchedule() {
   nextRecoveryAt = 0
 }
 
-function setProviderReady(message = 'DeepSeek 已连接，可以正常生成解释') {
+function providerDefinition(providerId) {
+  const provider = PROVIDERS[String(providerId || '').toLowerCase()]
+  if (!provider) throw new ApiError(400, '不支持这个模型服务商', 'unsupported_provider')
+  return provider
+}
+
+function normalizeBaseUrl(value, fallback) {
+  const rawValue = String(value || fallback || '').trim()
+  let url
+  try {
+    url = new URL(rawValue)
+  } catch {
+    throw new ApiError(400, '请输入有效的 API 地址', 'invalid_base_url')
+  }
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
+    throw new ApiError(400, 'API 地址必须是有效的 HTTP 或 HTTPS 地址', 'invalid_base_url')
+  }
+  return url.toString().replace(/\/$/, '')
+}
+
+function resolveBaseUrl(provider, override, hasOverride = false) {
+  const configured = String(process.env[provider.baseUrlEnvKey] || '').trim()
+  return normalizeBaseUrl(hasOverride ? override : configured, provider.defaultBaseUrl)
+}
+
+function activeProviderId() {
+  const preferred = String(process.env.PLAINIFY_AI_PROVIDER || '').toLowerCase()
+  if (PROVIDERS[preferred]) return preferred
+  if (String(process.env.DEEPSEEK_API_KEY || '').trim()) return 'deepseek'
+  if (String(process.env.OPENAI_API_KEY || '').trim()) return 'openai'
+  return DEFAULT_PROVIDER
+}
+
+function setProviderReady(providerId, message = '') {
+  const provider = providerDefinition(providerId)
   clearRecoverySchedule()
-  providerState = {
+  providerStates[provider.id] = {
     status: 'ready',
-    code: 'deepseek_ready',
-    message,
+    code: `${provider.id}_ready`,
+    message: message || `${provider.name} 已连接，可以正常生成解释`,
     checkedAt: new Date().toISOString(),
     recoverable: false,
   }
 }
 
-function setProviderFailure(error) {
-  providerState = {
-    status: error.code === 'deepseek_insufficient_balance'
+function setProviderFailure(providerId, error) {
+  const provider = providerDefinition(providerId)
+  providerStates[provider.id] = {
+    status: error.code === `${provider.id}_insufficient_balance`
       ? 'insufficient_balance'
-      : error.code === 'deepseek_rate_limited'
+      : error.code === `${provider.id}_rate_limited`
         ? 'rate_limited'
-        : error.code === 'deepseek_auth_failed'
+        : error.code === `${provider.id}_auth_failed`
           ? 'auth_failed'
           : 'temporarily_unavailable',
     code: error.code,
@@ -80,11 +138,11 @@ function setProviderFailure(error) {
     checkedAt: new Date().toISOString(),
     recoverable: Boolean(error.recoverable),
   }
-  if (error.recoverable) scheduleRecoveryProbe()
+  if (error.recoverable) scheduleRecoveryProbe(provider.id)
   else clearRecoverySchedule()
 }
 
-function deepSeekErrorDetails(text) {
+function providerErrorDetails(text) {
   try {
     const parsed = JSON.parse(text)
     const detail = parsed?.error || parsed
@@ -99,41 +157,46 @@ function deepSeekErrorDetails(text) {
 }
 
 export function classifyDeepSeekFailure(status, text = '') {
-  const detail = deepSeekErrorDetails(text)
+  return classifyProviderFailure(PROVIDERS.deepseek, status, text)
+}
+
+function classifyProviderFailure(provider, status, text = '') {
+  const detail = providerErrorDetails(text)
   const fingerprint = `${detail.message} ${detail.code} ${detail.type}`.toLowerCase()
   if (status === 402 || /(insufficient[ _-]*balance|balance[^a-z\u4e00-\u9fff]*insufficient|余额不足|账户余额)/i.test(fingerprint)) {
     return new ApiError(
       503,
-      'DeepSeek 账户余额不足；充值到账后加简大白话会自动恢复连接',
-      'deepseek_insufficient_balance',
+      `${provider.name} 账户余额不足；充值到账后加简大白话会自动恢复连接`,
+      `${provider.id}_insufficient_balance`,
       { recoverable: true, retryAfterMs: recoveryDelays()[0] },
     )
   }
   if (status === 401 || status === 403) {
-    return new ApiError(502, 'DeepSeek API Key 无效或没有权限', 'deepseek_auth_failed')
+    return new ApiError(502, `${provider.name} API Key 无效或没有权限`, `${provider.id}_auth_failed`)
   }
   if (status === 429) {
     return new ApiError(
       503,
-      'DeepSeek 请求过于频繁，加简大白话会稍后自动重试',
-      'deepseek_rate_limited',
+      `${provider.name} 请求过于频繁，加简大白话会稍后自动重试`,
+      `${provider.id}_rate_limited`,
       { recoverable: true, retryAfterMs: recoveryDelays()[0] },
     )
   }
   if (status >= 500 || status === 408) {
     return new ApiError(
       502,
-      `DeepSeek 暂时不可用（${status}），加简大白话会自动重试`,
-      'deepseek_temporarily_unavailable',
+      `${provider.name} 暂时不可用（${status}），加简大白话会自动重试`,
+      `${provider.id}_temporarily_unavailable`,
       { recoverable: true, retryAfterMs: recoveryDelays()[0] },
     )
   }
-  return new ApiError(502, `DeepSeek 请求失败（${status}）`, 'deepseek_request_failed')
+  return new ApiError(502, `${provider.name} 请求失败（${status}）`, `${provider.id}_request_failed`)
 }
 
-function normalizeModel(model) {
-  const value = String(model || '')
-  return FALLBACK_MODELS.includes(value) ? value : DEFAULT_MODEL
+function normalizeModel(providerId, model) {
+  const provider = providerDefinition(providerId)
+  const value = String(model || '').trim().slice(0, 160)
+  return value || provider.defaultModel
 }
 
 function allowedOrigin(request) {
@@ -147,7 +210,7 @@ function setCorsHeaders(response, origin) {
   response.setHeader('Access-Control-Allow-Origin', origin)
   response.setHeader('Vary', 'Origin')
   response.setHeader('Access-Control-Allow-Headers', 'Content-Type')
-  response.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+  response.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
 }
 
 function sendJson(response, status, payload, origin = '') {
@@ -180,11 +243,11 @@ function extractJson(content) {
   const cleaned = String(content || '').replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()
   const start = cleaned.indexOf('{')
   const end = cleaned.lastIndexOf('}')
-  if (start === -1 || end === -1) throw new ApiError(502, 'DeepSeek 返回格式无法识别', 'invalid_model_response')
+  if (start === -1 || end === -1) throw new ApiError(502, '模型返回格式无法识别', 'invalid_model_response')
   try {
     return JSON.parse(cleaned.slice(start, end + 1))
   } catch {
-    throw new ApiError(502, 'DeepSeek 返回的 JSON 无法解析', 'invalid_model_response')
+    throw new ApiError(502, '模型返回的 JSON 无法解析', 'invalid_model_response')
   }
 }
 
@@ -195,16 +258,26 @@ function requireTerm(value) {
   return term
 }
 
-function getConfig() {
-  const apiKey = String(process.env.DEEPSEEK_API_KEY || '').trim()
+function getConfig(providerId = activeProviderId(), overrides = {}) {
+  const provider = providerDefinition(providerId)
+  const apiKey = String(overrides.apiKey || process.env[provider.envKey] || '').trim()
+  const hasBaseUrlOverride = Object.hasOwn(overrides, 'baseUrl')
+  const baseUrl = resolveBaseUrl(provider, overrides.baseUrl, hasBaseUrlOverride)
   const mock = process.env.BAIHUABEN_MOCK_AI === '1'
-  return { apiKey, configured: Boolean(apiKey) || mock, mock }
+  return {
+    provider,
+    providerId: provider.id,
+    apiKey,
+    baseUrl,
+    configured: Boolean(apiKey) || mock,
+    mock,
+  }
 }
 
-function requireConfig() {
-  const config = getConfig()
+function requireConfig(providerId = activeProviderId()) {
+  const config = getConfig(providerId)
   if (!config.configured) {
-    throw new ApiError(503, '本机后端还没有配置 DeepSeek API Key', 'backend_not_configured')
+    throw new ApiError(503, `本机后端还没有配置 ${config.provider.name} API Key`, 'backend_not_configured')
   }
   return config
 }
@@ -214,7 +287,7 @@ function currentProviderState(config = getConfig()) {
     return {
       status: 'not_configured',
       code: 'backend_not_configured',
-      message: '本机后端还没有配置 DeepSeek API Key',
+      message: `本机后端还没有配置 ${config.provider.name} API Key`,
       checkedAt: null,
       recoverable: false,
     }
@@ -222,13 +295,13 @@ function currentProviderState(config = getConfig()) {
   if (config.mock) {
     return {
       status: 'ready',
-      code: 'deepseek_ready',
+      code: `${config.providerId}_ready`,
       message: '隔离测试服务已就绪',
-      checkedAt: providerState.checkedAt,
+      checkedAt: providerStates[config.providerId].checkedAt,
       recoverable: false,
     }
   }
-  return providerState
+  return providerStates[config.providerId]
 }
 
 function providerHealth(config = getConfig()) {
@@ -245,8 +318,10 @@ function providerHealth(config = getConfig()) {
   }
 }
 
-function scheduleRecoveryProbe() {
-  if (recoveryTimer || providerProbePromise || !providerState.recoverable) return
+function scheduleRecoveryProbe(providerId = activeProviderId()) {
+  const state = providerStates[providerId]
+  if (recoveryTimer || providerProbePromise || !state?.recoverable) return
+  recoveryProviderId = providerId
   const delays = recoveryDelays()
   const delay = delays[Math.min(recoveryAttempt, delays.length - 1)]
   recoveryAttempt += 1
@@ -254,17 +329,17 @@ function scheduleRecoveryProbe() {
   recoveryTimer = setTimeout(async () => {
     recoveryTimer = null
     nextRecoveryAt = 0
-    await probeDeepSeek({ force: true })
-    if (providerState.recoverable) scheduleRecoveryProbe()
+    await probeProvider(recoveryProviderId, { force: true })
+    if (providerStates[recoveryProviderId].recoverable) scheduleRecoveryProbe(recoveryProviderId)
   }, delay)
   recoveryTimer.unref?.()
 }
 
-async function requestDeepSeek(pathname, init, config = requireConfig()) {
+async function requestProvider(pathname, init, config = requireConfig()) {
   if (config.mock) return null
   let response
   try {
-    response = await fetch(`${DEEPSEEK_BASE_URL}${pathname}`, {
+    response = await fetch(`${config.baseUrl}${pathname}`, {
       ...init,
       headers: {
         ...init.headers,
@@ -276,69 +351,70 @@ async function requestDeepSeek(pathname, init, config = requireConfig()) {
     const timedOut = error.name === 'TimeoutError'
     const apiError = new ApiError(
       502,
-      timedOut ? 'DeepSeek 请求超时，加简大白话会自动重试' : '无法连接 DeepSeek，加简大白话会自动重试',
-      timedOut ? 'deepseek_timeout' : 'deepseek_unreachable',
+      timedOut ? `${config.provider.name} 请求超时，加简大白话会自动重试` : `无法连接 ${config.provider.name}，加简大白话会自动重试`,
+      timedOut ? `${config.providerId}_timeout` : `${config.providerId}_unreachable`,
       { recoverable: true, retryAfterMs: recoveryDelays()[0] },
     )
-    setProviderFailure(apiError)
+    setProviderFailure(config.providerId, apiError)
     throw apiError
   }
 
   const text = await response.text()
   if (!response.ok) {
-    const apiError = classifyDeepSeekFailure(response.status, text)
-    setProviderFailure(apiError)
+    const apiError = classifyProviderFailure(config.provider, response.status, text)
+    setProviderFailure(config.providerId, apiError)
     throw apiError
   }
 
-  if (pathname === '/chat/completions') setProviderReady()
+  if (pathname === '/chat/completions') setProviderReady(config.providerId)
 
   try {
     return JSON.parse(text)
   } catch {
-    throw new ApiError(502, 'DeepSeek 返回内容无法解析', 'invalid_model_response')
+    throw new ApiError(502, `${config.provider.name} 返回内容无法解析`, 'invalid_model_response')
   }
 }
 
-async function probeDeepSeek({ force = false } = {}) {
-  const config = getConfig()
+async function probeProvider(providerId = activeProviderId(), { force = false } = {}) {
+  const config = getConfig(providerId)
   if (!config.configured) return currentProviderState(config)
   if (config.mock) {
-    setProviderReady('隔离测试服务已就绪')
+    setProviderReady(providerId, '隔离测试服务已就绪')
     return currentProviderState(config)
   }
   if (providerProbePromise) return providerProbePromise
 
-  const checkedAt = Date.parse(providerState.checkedAt || '')
-  const cacheMs = providerState.status === 'ready' ? PROBE_READY_CACHE_MS : PROBE_FAILURE_CACHE_MS
-  if (!force && Number.isFinite(checkedAt) && Date.now() - checkedAt < cacheMs) return providerState
-  if (!force && providerState.status === 'auth_failed') return providerState
+  const state = providerStates[providerId]
+  const checkedAt = Date.parse(state.checkedAt || '')
+  const cacheMs = state.status === 'ready' ? PROBE_READY_CACHE_MS : PROBE_FAILURE_CACHE_MS
+  if (!force && Number.isFinite(checkedAt) && Date.now() - checkedAt < cacheMs) return state
+  if (!force && state.status === 'auth_failed') return state
 
   providerProbePromise = (async () => {
     try {
-      await requestDeepSeek('/chat/completions', {
+      await requestProvider('/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: DEFAULT_MODEL,
+          model: config.provider.defaultModel,
           messages: [{ role: 'user', content: '只回复 1' }],
           temperature: 0,
           max_tokens: 1,
         }),
       }, config)
     } catch {
-      // requestDeepSeek records the detailed recoverable state.
+      // requestProvider records the detailed recoverable state.
     }
     return currentProviderState(config)
   })().finally(() => {
     providerProbePromise = null
-    if (providerState.recoverable) scheduleRecoveryProbe()
+    if (providerStates[providerId].recoverable) scheduleRecoveryProbe(providerId)
   })
   return providerProbePromise
 }
 
-async function requestCompletion(messages, model, maxTokens = 900) {
-  const config = requireConfig()
+async function requestCompletion(messages, model, maxTokens = 900, providerId = activeProviderId()) {
+  const config = requireConfig(providerId)
   if (config.mock) {
     const prompt = String(messages.at(-1)?.content || '')
     if (prompt.includes('重新分组') || prompt.includes('增量归类')) {
@@ -354,19 +430,156 @@ async function requestCompletion(messages, model, maxTokens = 900) {
     })
   }
 
-  const data = await requestDeepSeek('/chat/completions', {
+  const body = {
+    model: normalizeModel(config.providerId, model),
+    messages,
+    max_tokens: maxTokens,
+  }
+  if (!/^(?:o[134](?:-|$)|gpt-5)/i.test(body.model)) body.temperature = 0.25
+  const data = await requestProvider('/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: normalizeModel(model),
-      messages,
-      temperature: 0.25,
-      max_tokens: maxTokens,
-    }),
+    body: JSON.stringify(body),
   }, config)
   const content = data.choices?.[0]?.message?.content
-  if (!content) throw new ApiError(502, 'DeepSeek 没有返回内容', 'empty_model_response')
+  if (!content) throw new ApiError(502, `${config.provider.name} 没有返回内容`, 'empty_model_response')
   return content
+}
+
+function isUsableModel(providerId, modelId) {
+  if (providerId !== 'openai') return true
+  return /^(?:gpt-|chatgpt-|o[134](?:-|$))/i.test(modelId)
+    && !/(?:realtime|audio|transcribe|tts|image|search|embedding|moderation)/i.test(modelId)
+}
+
+async function listProviderModels(config) {
+  if (!config.configured || config.mock) return config.provider.fallbackModels
+  const data = await requestProvider('/models', { method: 'GET', headers: {} }, config)
+  const models = Array.isArray(data.data)
+    ? [...new Set(data.data
+      .map((item) => String(item.id || '').trim())
+      .filter((id) => id && isUsableModel(config.providerId, id)))]
+    : []
+  return (models.length ? models : config.provider.fallbackModels).sort((a, b) => {
+    if (a === config.provider.defaultModel) return -1
+    if (b === config.provider.defaultModel) return 1
+    return a.localeCompare(b)
+  })
+}
+
+function providerSummary(provider) {
+  const apiKey = String(process.env[provider.envKey] || '').trim()
+  const baseUrl = resolveBaseUrl(provider)
+  return {
+    id: provider.id,
+    name: provider.name,
+    configured: Boolean(apiKey) || process.env.BAIHUABEN_MOCK_AI === '1',
+    keyLastFour: apiKey ? apiKey.slice(-4) : '',
+    baseUrl,
+    customBaseUrl: baseUrl === provider.defaultBaseUrl ? '' : baseUrl,
+    defaultBaseUrl: provider.defaultBaseUrl,
+    defaultModel: provider.defaultModel,
+  }
+}
+
+function requireSettingsOrigin(origin) {
+  if (origin && !LOCAL_WEB_ORIGIN.test(origin)) {
+    throw new ApiError(403, '只有本机网站可以修改模型配置', 'settings_origin_not_allowed')
+  }
+}
+
+function envLine(key, value) {
+  if (/\r|\n/.test(value)) throw new ApiError(400, 'API Key 格式不正确', 'invalid_api_key')
+  return `${key}=${JSON.stringify(value)}`
+}
+
+async function persistConfigValues(updates) {
+  const operation = async () => {
+    let source = ''
+    try {
+      source = await fs.readFile(configFilePath, 'utf8')
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error
+    }
+
+    const pending = new Map(Object.entries(updates))
+    const seen = new Set()
+    const lines = source.split(/\r?\n/).filter((line, index, all) => index < all.length - 1 || line)
+    const nextLines = []
+    for (const line of lines) {
+      const match = line.match(/^\s*(?:export\s+)?([A-Z][A-Z0-9_]*)\s*=/)
+      const key = match?.[1]
+      if (!key || !pending.has(key)) {
+        nextLines.push(line)
+        continue
+      }
+      if (seen.has(key)) continue
+      seen.add(key)
+      const value = pending.get(key)
+      if (value !== null) nextLines.push(envLine(key, String(value)))
+    }
+    for (const [key, value] of pending) {
+      if (!seen.has(key) && value !== null) nextLines.push(envLine(key, String(value)))
+    }
+
+    const temporaryPath = `${configFilePath}.tmp-${process.pid}-${Date.now()}`
+    await fs.writeFile(temporaryPath, `${nextLines.join('\n')}\n`, { mode: 0o600 })
+    await fs.rename(temporaryPath, configFilePath)
+    for (const [key, value] of pending) {
+      if (value === null) delete process.env[key]
+      else process.env[key] = String(value)
+    }
+  }
+  const pending = configWriteQueue.then(operation, operation)
+  configWriteQueue = pending.catch(() => {})
+  return pending
+}
+
+async function openConfigFile() {
+  await fs.mkdir(path.dirname(configFilePath), { recursive: true })
+  await fs.writeFile(configFilePath, '', { flag: 'a', mode: 0o600 })
+  const launcher = process.platform === 'darwin'
+    ? { command: 'open', args: [configFilePath] }
+    : process.platform === 'win32'
+      ? { command: 'cmd', args: ['/c', 'start', '', configFilePath] }
+      : { command: 'xdg-open', args: [configFilePath] }
+  await new Promise((resolve, reject) => {
+    const child = spawn(launcher.command, launcher.args, { detached: true, stdio: 'ignore' })
+    child.once('error', reject)
+    child.once('spawn', () => {
+      child.unref()
+      resolve()
+    })
+  })
+}
+
+async function saveCredential(providerId, input = {}) {
+  const provider = providerDefinition(providerId)
+  const secret = String(input.apiKey || process.env[provider.envKey] || '').trim()
+  if (secret.length < 8 || secret.length > 512) {
+    throw new ApiError(400, '请输入有效的 API Key', 'invalid_api_key')
+  }
+  const hasBaseUrl = Object.hasOwn(input, 'baseUrl')
+  const candidate = getConfig(provider.id, {
+    apiKey: secret,
+    ...(hasBaseUrl ? { baseUrl: input.baseUrl } : {}),
+  })
+  const models = await listProviderModels(candidate)
+  const currentProviderModel = activeProviderId() === provider.id ? process.env.PLAINIFY_AI_MODEL : ''
+  const selectedModel = normalizeModel(provider.id, input.model || currentProviderModel || provider.defaultModel)
+  const updates = {
+    [provider.envKey]: secret,
+    PLAINIFY_AI_PROVIDER: provider.id,
+    PLAINIFY_AI_MODEL: selectedModel,
+  }
+  if (hasBaseUrl) {
+    updates[provider.baseUrlEnvKey] = candidate.baseUrl === provider.defaultBaseUrl
+      ? null
+      : candidate.baseUrl
+  }
+  await persistConfigValues(updates)
+  setProviderReady(provider.id, `${provider.name} API Key 已验证`)
+  return { provider: providerSummary(provider), models, activeProvider: provider.id, activeModel: selectedModel }
 }
 
 async function routeRequest(request, response, origin) {
@@ -374,27 +587,104 @@ async function routeRequest(request, response, origin) {
 
   if (request.method === 'GET' && url.pathname === '/api/health') {
     const config = getConfig()
-    if (url.searchParams.get('probe') === '1' && config.configured) await probeDeepSeek()
+    if (url.searchParams.get('probe') === '1' && config.configured) await probeProvider(config.providerId)
     sendJson(response, 200, {
       ok: true,
       ...providerHealth(config),
-      mode: config.mock ? 'mock' : 'deepseek',
-      provider: 'DeepSeek',
+      mode: config.mock ? 'mock' : config.providerId,
+      provider: config.provider.name,
+      providerId: config.providerId,
+      model: normalizeModel(config.providerId, process.env.PLAINIFY_AI_MODEL),
     }, origin)
     return
   }
 
   if (request.method === 'GET' && url.pathname === '/api/models') {
     const config = getConfig()
-    if (!config.configured || config.mock) {
-      sendJson(response, 200, { ok: true, configured: config.configured, models: FALLBACK_MODELS }, origin)
+    const models = await listProviderModels(config)
+    sendJson(response, 200, { ok: true, configured: config.configured, models }, origin)
+    return
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/ai/providers') {
+    requireSettingsOrigin(origin)
+    const providerId = activeProviderId()
+    sendJson(response, 200, {
+      ok: true,
+      activeProvider: providerId,
+      activeModel: normalizeModel(providerId, process.env.PLAINIFY_AI_MODEL),
+      providers: Object.values(PROVIDERS).map(providerSummary),
+    }, origin)
+    return
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/settings/open-config') {
+    requireSettingsOrigin(origin)
+    await openConfigFile()
+    sendJson(response, 200, { ok: true }, origin)
+    return
+  }
+
+  const providerRoute = url.pathname.match(/^\/api\/ai\/providers\/([^/]+)\/(credentials|models|test)$/)
+  if (providerRoute) {
+    requireSettingsOrigin(origin)
+    const provider = providerDefinition(decodeURIComponent(providerRoute[1]))
+    const action = providerRoute[2]
+    if (['GET', 'POST'].includes(request.method) && action === 'models') {
+      const body = request.method === 'POST' ? await readJson(request) : {}
+      const config = getConfig(provider.id, {
+        ...(String(body.apiKey || '').trim() ? { apiKey: body.apiKey } : {}),
+        ...(Object.hasOwn(body, 'baseUrl') ? { baseUrl: body.baseUrl } : {}),
+      })
+      const models = await listProviderModels(config)
+      sendJson(response, 200, {
+        ok: true,
+        configured: config.configured,
+        baseUrl: config.baseUrl,
+        models,
+      }, origin)
       return
     }
-    const data = await requestDeepSeek('/models', { method: 'GET', headers: {} }, config)
-    const models = Array.isArray(data.data)
-      ? [...new Set(data.data.map((item) => String(item.id || '')).filter((id) => FALLBACK_MODELS.includes(id)))]
-      : []
-    sendJson(response, 200, { ok: true, configured: true, models: models.length ? models : FALLBACK_MODELS }, origin)
+    if (request.method === 'POST' && action === 'credentials') {
+      const body = await readJson(request)
+      const result = await saveCredential(provider.id, body)
+      sendJson(response, 200, { ok: true, ...result }, origin)
+      return
+    }
+    if (request.method === 'DELETE' && action === 'credentials') {
+      await persistConfigValues({
+        [provider.envKey]: null,
+        [provider.baseUrlEnvKey]: null,
+      })
+      providerStates[provider.id] = {
+        status: 'not_configured',
+        code: 'backend_not_configured',
+        message: `本机后端还没有配置 ${provider.name} API Key`,
+        checkedAt: null,
+        recoverable: false,
+      }
+      sendJson(response, 200, { ok: true, provider: providerSummary(provider) }, origin)
+      return
+    }
+    if (request.method === 'POST' && action === 'test') {
+      const body = await readJson(request)
+      const content = await requestCompletion([
+        { role: 'system', content: '只回复“连接成功”。' },
+        { role: 'user', content: '测试连接' },
+      ], body.model, 20, provider.id)
+      sendJson(response, 200, { ok: true, message: content.trim() }, origin)
+      return
+    }
+  }
+
+  if (request.method === 'PUT' && url.pathname === '/api/ai/active') {
+    requireSettingsOrigin(origin)
+    const body = await readJson(request)
+    const provider = providerDefinition(body.provider)
+    requireConfig(provider.id)
+    const model = normalizeModel(provider.id, body.model)
+    await persistConfigValues({ PLAINIFY_AI_PROVIDER: provider.id, PLAINIFY_AI_MODEL: model })
+    sendJson(response, 200, { ok: true, activeProvider: provider.id, activeModel: model }, origin)
     return
   }
 
@@ -410,9 +700,9 @@ async function routeRequest(request, response, origin) {
         role: 'user',
         content: `解释术语“${term}”。返回：{"explanation":"2到3句大白话解释","analogy":"一句生活化类比"}`,
       },
-    ], body.model, 450)
+    ], body.model, 450, body.provider)
     const result = extractJson(content)
-    if (!result.explanation) throw new ApiError(502, 'DeepSeek 没有给出解释', 'empty_explanation')
+    if (!result.explanation) throw new ApiError(502, '模型没有给出解释', 'empty_explanation')
     sendJson(response, 200, {
       ok: true,
       term,
@@ -450,18 +740,18 @@ async function routeRequest(request, response, origin) {
           ? `请把这些术语归入不超过 ${maxGroups} 个技术大类，确保每个 id 都出现一次。术语：${JSON.stringify(terms)}。返回格式：{"assignments":[{"id":"原 id","category":"宽泛大类名"}]}`
           : `已有分组：${JSON.stringify(existingCategories)}。请只给以下新术语增量归类，优先选择已有大类，不要为 1 到 2 个词新建细分组，确保每个 id 都出现一次。术语：${JSON.stringify(terms)}。返回格式：{"assignments":[{"id":"原 id","category":"宽泛大类名"}]}`,
       },
-    ], body.model, 1400)
+    ], body.model, 1400, body.provider)
     const result = extractJson(content)
     sendJson(response, 200, { ok: true, assignments: Array.isArray(result.assignments) ? result.assignments : [] }, origin)
     return
   }
 
   if (request.method === 'POST' && url.pathname === '/api/test') {
-    await readJson(request)
+    const body = await readJson(request)
     const content = await requestCompletion([
       { role: 'system', content: '只回复“连接成功”。' },
       { role: 'user', content: '测试连接' },
-    ], DEFAULT_MODEL, 20)
+    ], body.model, 20, body.provider)
     sendJson(response, 200, { ok: true, message: content.trim() }, origin)
     return
   }
@@ -470,6 +760,7 @@ async function routeRequest(request, response, origin) {
 }
 
 export function startApiServer(options = {}) {
+  configFilePath = path.resolve(options.configPath ?? process.env.BAIHUABEN_ENV_FILE ?? '.env.local')
   const port = Number(options.port ?? process.env.BAIHUABEN_API_PORT ?? DEFAULT_PORT)
   const server = http.createServer(async (request, response) => {
     const origin = allowedOrigin(request)
@@ -512,5 +803,5 @@ const isDirectRun = process.argv[1]
 if (isDirectRun) {
   const { host, port } = await startApiServer()
   const config = getConfig()
-  console.log(`加简大白话后端：http://${host}:${port}（${config.configured ? 'DeepSeek 已配置' : '等待配置 DeepSeek Key'}）`)
+  console.log(`加简大白话后端：http://${host}:${port}（${config.configured ? `${config.provider.name} 已配置` : `等待配置 ${config.provider.name} Key`}）`)
 }

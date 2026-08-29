@@ -62,14 +62,14 @@ const status = await getBackendStatus()
 assert.equal(status.configured, true)
 assert.equal(calls[0].url, 'http://127.0.0.1:8787/api/health')
 
-const remoteModels = await fetchProviderModels({ apiKey: 'must-not-leave-browser' })
-assert.deepEqual(remoteModels, ['deepseek-chat', 'deepseek-reasoner'])
-assert.equal(calls[1].url, 'http://127.0.0.1:8787/api/models')
+const remoteModels = await fetchProviderModels({ provider: 'deepseek', apiKey: 'must-not-leave-browser' })
+assert.deepEqual(remoteModels, ['deepseek-chat', 'deepseek-reasoner', 'deepseek-v4-flash'])
+assert.equal(calls[1].url, 'http://127.0.0.1:8787/api/ai/providers/deepseek/models')
 assert.equal(calls[1].options.headers?.Authorization, undefined)
 
 const explanation = await explainTerm('Context window', {
   apiKey: 'sk-test',
-  provider: 'openai',
+  provider: 'deepseek',
   baseUrl: 'https://wrong.example/v1',
   model: 'deepseek-reasoner',
 })
@@ -79,22 +79,27 @@ assert.deepEqual(explanation, {
   category: '测试分组',
 })
 assert.equal(calls[2].url, 'http://127.0.0.1:8787/api/explain')
-assert.deepEqual(JSON.parse(calls[2].options.body), { term: 'Context window', model: 'deepseek-reasoner' })
+assert.deepEqual(JSON.parse(calls[2].options.body), {
+  term: 'Context window',
+  provider: 'deepseek',
+  model: 'deepseek-reasoner',
+})
 
-await testAiConnection({ apiKey: 'sk-test', model: 'gpt-5' })
-assert.equal(calls[3].url, 'http://127.0.0.1:8787/api/test')
-assert.deepEqual(JSON.parse(calls[3].options.body), { model: 'gpt-5' })
+await testAiConnection({ apiKey: 'sk-test', provider: 'deepseek', model: 'deepseek-chat' })
+assert.equal(calls[3].url, 'http://127.0.0.1:8787/api/ai/providers/deepseek/test')
+assert.deepEqual(JSON.parse(calls[3].options.body), { model: 'deepseek-chat' })
 
 const organized = await organizeWithAi([
   { id: 'term-new', term: 'RAG', explanation: '先检索后回答', category: '未分组' },
   { id: 'term-stable', term: 'Commit', explanation: '一次代码提交', category: '版本控制' },
-], { apiKey: 'sk-test', model: 'deepseek-chat' }, 'incremental', ['版本控制', '空分组'])
+], { apiKey: 'sk-test', provider: 'deepseek', model: 'deepseek-chat' }, 'incremental', ['版本控制', '空分组'])
 assert.equal(organized[0].category, '大模型基础')
 assert.equal(organized[1].category, '版本控制')
 
 assert.equal(calls[4].url, 'http://127.0.0.1:8787/api/organize')
 assert.deepEqual(JSON.parse(calls[4].options.body), {
   model: 'deepseek-chat',
+  provider: 'deepseek',
   mode: 'incremental',
   existingCategories: ['版本控制', '空分组'],
   terms: [{ id: 'term-new', term: 'RAG', explanation: '先检索后回答' }],

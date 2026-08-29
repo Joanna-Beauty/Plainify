@@ -58,6 +58,7 @@ export default function App() {
   const [toast, setToast] = useState(null)
   const [extensionReady, setExtensionReady] = useState(false)
   const [groupingPreview, setGroupingPreview] = useState(null)
+  const [sidebarCollapsed, setSidebarCollapsed] = useLocalStorage('baihuaben:sidebar-collapsed:v1', false)
   const settings = useMemo(() => normalizeProviderSettings(storedSettings), [storedSettings])
   const selectedTerm = useMemo(() => terms.find((term) => term.id === selectedId), [selectedId, terms])
   const activeTerms = useMemo(() => terms.filter((term) => !isArchived(term)), [terms])
@@ -73,7 +74,7 @@ export default function App() {
   }, [toast])
 
   useEffect(() => {
-    const hasLegacySecret = ['apiKey', 'baseUrl', 'provider'].some((key) => Object.hasOwn(storedSettings, key))
+    const hasLegacySecret = ['apiKey', 'baseUrl'].some((key) => Object.hasOwn(storedSettings, key))
     if (hasLegacySecret) setSettings(settings)
   }, [setSettings, settings, storedSettings])
 
@@ -358,8 +359,14 @@ export default function App() {
   }
 
   return (
-    <div className="app-shell">
-      <Sidebar extensionReady={extensionReady} page={page} setPage={setPage} />
+    <div className={sidebarCollapsed ? 'app-shell sidebar-collapsed' : 'app-shell'}>
+      <Sidebar
+        collapsed={sidebarCollapsed}
+        extensionReady={extensionReady}
+        onToggle={() => setSidebarCollapsed((current) => !current)}
+        page={page}
+        setPage={setPage}
+      />
       <header className="mobile-header"><Brand /></header>
       {page === 'library' ? (
         <LibraryPage
@@ -389,6 +396,7 @@ export default function App() {
       {page === 'settings' ? (
         <ModelSettingsPage
           extensionReady={extensionReady}
+          onClose={() => setPage('library')}
           onSave={saveSettings}
           onSyncExtension={syncExtension}
           settings={settings}
