@@ -1,4 +1,5 @@
 import { UNGROUPED, normalizeGroupName } from './grouping.js'
+import { touchTerm } from './terms.js'
 
 export function isArchived(term) {
   return term?.archived === true
@@ -11,17 +12,15 @@ export function archivedCategoryFor(term) {
 export function archiveTermInList(terms, id, archivedAt = new Date().toISOString()) {
   return terms.map((term) => {
     if (term.id !== id || isArchived(term)) return term
-    return {
-      ...term,
+    return touchTerm(term, {
       archived: true,
       archivedAt,
       archivedCategory: normalizeGroupName(term.category) || UNGROUPED,
-      mastered: true,
-    }
+    }, 'archive', archivedAt)
   })
 }
 
-export function restoreTermInList(terms, id, groups) {
+export function restoreTermInList(terms, id, groups, restoredAt = new Date().toISOString()) {
   const availableGroups = new Set(Array.isArray(groups) ? groups : [])
   return terms.map((term) => {
     if (term.id !== id || !isArchived(term)) return term
@@ -29,12 +28,11 @@ export function restoreTermInList(terms, id, groups) {
     const category = archivedCategory === UNGROUPED || !availableGroups.has(archivedCategory)
       ? UNGROUPED
       : archivedCategory
-    return {
-      ...term,
+    return touchTerm(term, {
       archived: false,
       archivedAt: '',
       archivedCategory: '',
       category,
-    }
+    }, ['archive', 'category'], restoredAt)
   })
 }

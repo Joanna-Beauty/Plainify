@@ -66,6 +66,10 @@ const remoteModels = await fetchProviderModels({ provider: 'deepseek', apiKey: '
 assert.deepEqual(remoteModels, ['deepseek-chat', 'deepseek-reasoner', 'deepseek-v4-flash'])
 assert.equal(calls[1].url, 'http://127.0.0.1:8787/api/ai/providers/deepseek/models')
 assert.equal(calls[1].options.headers?.Authorization, undefined)
+assert.deepEqual(JSON.parse(calls[1].options.body), {
+  apiKey: 'must-not-leave-browser',
+  baseUrl: 'https://api.deepseek.com/v1',
+})
 
 const explanation = await explainTerm('Context window', {
   apiKey: 'sk-test',
@@ -87,7 +91,9 @@ assert.deepEqual(JSON.parse(calls[2].options.body), {
 
 await testAiConnection({ apiKey: 'sk-test', provider: 'deepseek', model: 'deepseek-chat' })
 assert.equal(calls[3].url, 'http://127.0.0.1:8787/api/ai/providers/deepseek/test')
-assert.deepEqual(JSON.parse(calls[3].options.body), { model: 'deepseek-chat' })
+assert.deepEqual(JSON.parse(calls[3].options.body), {
+  model: 'deepseek-chat',
+})
 
 const organized = await organizeWithAi([
   { id: 'term-new', term: 'RAG', explanation: '先检索后回答', category: '未分组' },
@@ -111,9 +117,11 @@ const localOrganized = organizeLocally([
 ])
 assert.equal(localOrganized[0].category, 'API 与网络')
 assert.equal(localOrganized[1].category, '我的固定分组')
-assert.equal(calls.some((call) => JSON.stringify(call).includes('must-not-leave-browser')), false)
+assert.equal(calls.every((call) => call.url.startsWith('http://127.0.0.1:8787/api/')), true)
+assert.equal(JSON.stringify(calls[2]).includes('sk-test'), false)
+assert.equal(JSON.stringify(calls[4]).includes('sk-test'), false)
 
 console.log('PASS website uses the localhost backend for status, models, explanation, test, and grouping')
-console.log('PASS legacy browser API Key is never sent in URL, headers, or request body')
+console.log('PASS temporary credentials only travel to localhost provider validation endpoints')
 console.log('PASS incremental grouping sends only ungrouped terms and preserves existing categories')
 await vite.close()

@@ -226,6 +226,23 @@ async function run() {
   assert.equal(storage.terms[0].analogy, '像桌面能同时摊开的资料数量。')
   assert.equal(storage.terms[0].sourceUrl, 'https://example.com/article')
 
+  const clearedAt = '2099-08-29T00:00:00.000Z'
+  fakeWindow.postMessage({
+    source: 'baihuaben-web',
+    type: 'SYNC_TERMS',
+    terms: [{
+      ...storage.terms[0],
+      source: '',
+      sourceUrl: '',
+      updatedAt: clearedAt,
+      fieldUpdatedAt: { ...storage.terms[0].fieldUpdatedAt, content: clearedAt },
+    }],
+  })
+  await flush()
+  await flush()
+  assert.equal(storage.terms[0].source, '')
+  assert.equal(storage.terms[0].sourceUrl, '')
+
   fakeWindow.postMessage({
     source: 'baihuaben-web',
     type: 'SYNC_TERMS',
@@ -269,7 +286,7 @@ async function run() {
   })
   await flush()
   assert.equal(archived.term.archived, true)
-  assert.equal(archived.term.mastered, true)
+  assert.equal(archived.term.mastered, false)
   assert.ok(archived.term.archivedAt)
   assert.equal(archived.term.archivedCategory, archived.term.category)
   assert.ok(appMessages.some((message) => (
@@ -280,10 +297,11 @@ async function run() {
 
   console.log('PASS explanation preview does not save until SAVE_TERM is confirmed')
   console.log('PASS stale website sync cannot overwrite a saved explanation or source URL')
+  console.log('PASS newer website edits can explicitly clear source metadata')
   console.log('PASS stale ready terms cannot overwrite a saved analogy with an empty value')
   console.log('PASS explanation, analogy, and hover settings survive synchronization')
   console.log('PASS legacy API Key and base URL are removed while provider selection remains available')
-  console.log('PASS floating-panel archive reaches website sync with mastered archive metadata')
+  console.log('PASS floating-panel archive reaches website sync without changing review mastery')
 }
 
 run().catch((error) => {

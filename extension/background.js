@@ -46,8 +46,125 @@ function normalizeTerm(rawTerm) {
   return term
 }
 
-function buildTerm(term, metadata = {}, generated = {}) {
+const TERM_FIELD_SCOPES = ['content', 'category', 'review', 'archive']
+
+function validTimestamp(value, fallback = '') {
+  const timestamp = String(value || '')
+  return Number.isFinite(Date.parse(timestamp)) ? timestamp : fallback
+}
+
+function latestTimestamp(...values) {
+  return values
+    .map((value) => validTimestamp(value))
+    .filter(Boolean)
+    .sort((a, b) => Date.parse(b) - Date.parse(a))[0] || ''
+}
+
+function earliestTimestamp(...values) {
+  return values
+    .map((value) => validTimestamp(value))
+    .filter(Boolean)
+    .sort((a, b) => Date.parse(a) - Date.parse(b))[0] || ''
+}
+
+function normalizeTermRecord(rawTerm = {}, options = {}) {
+  const now = validTimestamp(options.now) || new Date().toISOString()
+  const term = String(rawTerm.term || '').trim().replace(/\s+/g, ' ')
+  const explanation = String(rawTerm.explanation || '')
+  const archived = rawTerm.archived === true
+  const createdAt = validTimestamp(rawTerm.createdAt, now)
+  const baseUpdatedAt = validTimestamp(rawTerm.updatedAt, createdAt)
+  const archivedAt = archived ? validTimestamp(rawTerm.archivedAt) : ''
+  const lastReviewedAt = validTimestamp(rawTerm.lastReviewedAt)
+  const fieldUpdatedAt = {
+    content: validTimestamp(rawTerm.fieldUpdatedAt?.content, baseUpdatedAt),
+    category: validTimestamp(rawTerm.fieldUpdatedAt?.category, baseUpdatedAt),
+    review: validTimestamp(rawTerm.fieldUpdatedAt?.review, lastReviewedAt || baseUpdatedAt),
+    archive: validTimestamp(rawTerm.fieldUpdatedAt?.archive, archivedAt || baseUpdatedAt),
+  }
+  const updatedAt = latestTimestamp(baseUpdatedAt, ...Object.values(fieldUpdatedAt)) || createdAt
+  const category = String(rawTerm.category || '未分组').trim() || '未分组'
   return {
+    ...rawTerm,
+    id: String(rawTerm.id || options.id || ''),
+    term,
+    explanation,
+    analogy: String(rawTerm.analogy || ''),
+    category,
+    source: String(rawTerm.source ?? options.source ?? '来自网页插件'),
+    sourceUrl: String(rawTerm.sourceUrl || ''),
+    createdAt,
+    updatedAt,
+    fieldUpdatedAt,
+    reviewCount: Math.max(0, Number(rawTerm.reviewCount || 0)),
+    mastered: Boolean(rawTerm.mastered),
+    lastReviewedAt,
+    archived,
+    archivedAt,
+    archivedCategory: archived
+      ? String(rawTerm.archivedCategory || category).trim() || '未分组'
+      : '',
+    status: explanation ? 'ready' : 'pending',
+  }
+}
+
+function touchTerm(term, changes, scopes, updatedAt = new Date().toISOString()) {
+  const current = normalizeTermRecord(term, { now: updatedAt })
+  const nextScopes = Array.isArray(scopes) ? scopes : [scopes]
+  const fieldUpdatedAt = { ...current.fieldUpdatedAt }
+  for (const scope of nextScopes) {
+    if (TERM_FIELD_SCOPES.includes(scope)) fieldUpdatedAt[scope] = updatedAt
+  }
+  return normalizeTermRecord({ ...current, ...changes, updatedAt, fieldUpdatedAt }, { now: updatedAt })
+}
+
+function scopeSource(primary, fallback, scope) {
+  const primaryTime = Date.parse(primary.fieldUpdatedAt[scope]) || 0
+  const fallbackTime = Date.parse(fallback.fieldUpdatedAt[scope]) || 0
+  if (scope === 'content' && fallbackTime === primaryTime) {
+    const contentScore = (term) => ['term', 'explanation', 'analogy', 'source', 'sourceUrl']
+      .filter((field) => String(term[field] || '').trim()).length
+    if (contentScore(fallback) > contentScore(primary)) return fallback
+  }
+  return fallbackTime > primaryTime ? fallback : primary
+}
+
+function mergeTermRecords(primaryRecord, fallbackRecord) {
+  const primary = normalizeTermRecord(primaryRecord, { now: primaryRecord?.createdAt })
+  const fallback = normalizeTermRecord(fallbackRecord, { now: fallbackRecord?.createdAt })
+  const content = scopeSource(primary, fallback, 'content')
+  const category = scopeSource(primary, fallback, 'category')
+  const review = scopeSource(primary, fallback, 'review')
+  const archive = scopeSource(primary, fallback, 'archive')
+  const fieldUpdatedAt = Object.fromEntries(TERM_FIELD_SCOPES.map((scope) => [
+    scope,
+    latestTimestamp(primary.fieldUpdatedAt[scope], fallback.fieldUpdatedAt[scope]),
+  ]))
+  return normalizeTermRecord({
+    ...fallback,
+    ...primary,
+    id: primary.id || fallback.id,
+    term: content.term,
+    explanation: content.explanation,
+    analogy: content.analogy,
+    source: content.source,
+    sourceUrl: content.sourceUrl,
+    category: category.category,
+    reviewCount: review.reviewCount,
+    mastered: review.mastered,
+    lastReviewedAt: review.lastReviewedAt,
+    archived: archive.archived,
+    archivedAt: archive.archivedAt,
+    archivedCategory: archive.archivedCategory,
+    createdAt: earliestTimestamp(primary.createdAt, fallback.createdAt),
+    updatedAt: latestTimestamp(primary.updatedAt, fallback.updatedAt, ...Object.values(fieldUpdatedAt)),
+    fieldUpdatedAt,
+  }, { now: primary.createdAt || fallback.createdAt })
+}
+
+function buildTerm(term, metadata = {}, generated = {}) {
+  const now = new Date().toISOString()
+  return normalizeTermRecord({
     id: generated.id || crypto.randomUUID(),
     term,
     explanation: String(generated.explanation || ''),
@@ -55,7 +172,8 @@ function buildTerm(term, metadata = {}, generated = {}) {
     category: String(generated.category || '未分组'),
     source: metadata.source || generated.source || '来自网页插件',
     sourceUrl: metadata.sourceUrl || generated.sourceUrl || '',
-    createdAt: generated.createdAt || new Date().toISOString(),
+    createdAt: generated.createdAt || now,
+    updatedAt: generated.updatedAt || now,
     reviewCount: Number(generated.reviewCount || 0),
     mastered: Boolean(generated.mastered),
     archived: Boolean(generated.archived),
@@ -63,26 +181,11 @@ function buildTerm(term, metadata = {}, generated = {}) {
     archivedCategory: generated.archived
       ? String(generated.archivedCategory || generated.category || '未分组')
       : '',
-    status: generated.explanation ? 'ready' : 'pending',
-  }
+  }, { now })
 }
 
 function mergeTermFields(primary, fallback = {}) {
-  const explanation = String(primary.explanation || fallback.explanation || '')
-  return {
-    ...primary,
-    explanation,
-    analogy: String(primary.analogy || fallback.analogy || ''),
-    category: String(primary.category || fallback.category || '未分组'),
-    source: primary.sourceUrl ? primary.source : fallback.source || primary.source,
-    sourceUrl: primary.sourceUrl || fallback.sourceUrl || '',
-    archived: Boolean(primary.archived),
-    archivedAt: String(primary.archivedAt || ''),
-    archivedCategory: primary.archived
-      ? String(primary.archivedCategory || primary.category || fallback.archivedCategory || '未分组')
-      : '',
-    status: explanation ? 'ready' : primary.status || fallback.status || 'pending',
-  }
+  return mergeTermRecords(primary, fallback)
 }
 
 function mergeSyncedTerms(incomingTerms, storedTerms) {
@@ -158,10 +261,12 @@ async function previewTerm(rawTerm, metadata = {}) {
     const latest = await chrome.storage.local.get('terms')
     const latestTerms = Array.isArray(latest.terms) ? latest.terms : []
     await chrome.storage.local.set({
-      terms: latestTerms.map((item) => item.id === duplicate.id ? { ...item, ...generated, status: 'ready' } : item),
+      terms: latestTerms.map((item) => item.id === duplicate.id
+        ? touchTerm(item, generated, 'content')
+        : item),
     })
   })
-  return { status: 'exists', term: { ...duplicate, ...generated, status: 'ready' } }
+  return { status: 'exists', term: touchTerm(duplicate, generated, 'content') }
 }
 
 async function savePreparedTerm(rawItem, metadata = {}) {
@@ -175,15 +280,13 @@ async function savePreparedTerm(rawItem, metadata = {}) {
       const shouldAddAnalogy = !duplicate.analogy && rawItem.analogy
       const shouldComplete = duplicate.status !== 'ready' && (duplicate.explanation || rawItem.explanation)
       const shouldAddSource = !duplicate.sourceUrl && metadata.sourceUrl
-      const updated = shouldAddExplanation || shouldAddAnalogy || shouldComplete || shouldAddSource ? {
-        ...duplicate,
+      const updated = shouldAddExplanation || shouldAddAnalogy || shouldComplete || shouldAddSource ? touchTerm(duplicate, {
         ...(shouldAddExplanation ? {
           explanation: String(rawItem.explanation),
         } : {}),
         ...(shouldAddAnalogy ? { analogy: String(rawItem.analogy) } : {}),
-        ...(shouldComplete ? { status: 'ready' } : {}),
         ...(shouldAddSource ? { source: metadata.source, sourceUrl: metadata.sourceUrl } : {}),
-      } : duplicate
+      }, 'content') : duplicate
       if (updated !== duplicate) {
         await chrome.storage.local.set({ terms: terms.map((item) => item.id === duplicate.id ? updated : item) })
       }
@@ -221,13 +324,12 @@ async function archiveTerm(id, rawTerm) {
 
     const current = terms[index]
     if (current.archived === true) return { status: 'archived', term: current }
-    const archived = {
-      ...current,
+    const archivedAt = new Date().toISOString()
+    const archived = touchTerm(current, {
       archived: true,
-      archivedAt: new Date().toISOString(),
+      archivedAt,
       archivedCategory: String(current.category || '未分组'),
-      mastered: true,
-    }
+    }, 'archive', archivedAt)
     const nextTerms = [...terms]
     nextTerms[index] = archived
     await chrome.storage.local.set({ terms: nextTerms })

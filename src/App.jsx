@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { archiveTermInList, archivedCategoryFor, isArchived, restoreTermInList } from './data/archive'
 import Sidebar, { Brand } from './components/Sidebar'
 import TermDrawer from './components/TermDrawer'
@@ -21,37 +21,30 @@ import {
   renameGroup as renameGroupData,
 } from './data/grouping'
 import { normalizeProviderSettings } from './data/modelProviders'
+import { reviewTermInList } from './data/review'
 import { defaultSettings, seedTerms } from './data/seedTerms'
 import { mergeExtensionTerms } from './data/termSync'
+import {
+  clearSupersededTombstones,
+  createTermTombstone,
+  normalizeTermList,
+  normalizeTermRecord,
+  normalizeTermText,
+  stampChangedTerms,
+  termKey,
+  touchTerm,
+} from './data/terms'
 import { useLocalStorage } from './hooks/useLocalStorage'
 import { explainTerm, getLocalExplanation, organizeLocally, organizeWithAi } from './services/ai'
 
 const defaultGroups = groupNamesFromTerms(seedTerms)
-
-function normalizeIncomingTerm(term) {
-  return {
-    id: term.id || crypto.randomUUID(),
-    term: String(term.term || '').trim(),
-    explanation: String(term.explanation || ''),
-    analogy: String(term.analogy || ''),
-    category: String(term.category || '未分组'),
-    source: String(term.source || '来自网页插件'),
-    sourceUrl: String(term.sourceUrl || ''),
-    createdAt: term.createdAt || new Date().toISOString(),
-    reviewCount: Number(term.reviewCount || 0),
-    mastered: Boolean(term.mastered),
-    archived: Boolean(term.archived),
-    archivedAt: String(term.archivedAt || ''),
-    archivedCategory: term.archived ? String(term.archivedCategory || term.category || UNGROUPED) : '',
-    status: term.status === 'ready' && term.explanation ? 'ready' : 'pending',
-  }
-}
 
 export default function App() {
   const [page, setPage] = useState('library')
   const [terms, setTerms] = useLocalStorage('baihuaben:terms:v1', seedTerms)
   const [groups, setGroups] = useLocalStorage('baihuaben:groups:v1', defaultGroups)
   const [lastGroupingChange, setLastGroupingChange] = useLocalStorage('baihuaben:last-grouping:v1', null)
+  const [termTombstones, setTermTombstones] = useLocalStorage('baihuaben:term-tombstones:v1', {})
   const [storedSettings, setSettings] = useLocalStorage('baihuaben:settings:v1', defaultSettings)
   const [selectedId, setSelectedId] = useState(null)
   const [busy, setBusy] = useState('')
@@ -79,6 +72,10 @@ export default function App() {
   }, [setSettings, settings, storedSettings])
 
   useEffect(() => {
+    setTerms((current) => normalizeTermList(current))
+  }, [setTerms])
+
+  useEffect(() => {
     const discovered = groupNamesFromTerms(activeTerms)
     setGroups((current) => {
       const next = mergeGroupNames(current, discovered)
@@ -91,22 +88,34 @@ export default function App() {
       if (event.source !== window || event.data?.source !== 'baihuaben-extension') return
       if (!['READY', 'TERMS_CHANGED'].includes(event.data.type)) return
       setExtensionReady(true)
-      const incoming = Array.isArray(event.data.terms) ? event.data.terms.map(normalizeIncomingTerm).filter((term) => term.term) : []
+      const incoming = Array.isArray(event.data.terms) ? event.data.terms.map((term) => normalizeTermRecord(term, {
+        id: term.id || crypto.randomUUID(),
+        now: term.createdAt,
+      })).filter((term) => term.term) : []
       if (!incoming.length) return
-      setTerms((current) => mergeExtensionTerms(current, incoming))
+      setTerms((current) => mergeExtensionTerms(current, incoming, termTombstones))
+      setTermTombstones((current) => clearSupersededTombstones(current, incoming))
     }
     window.addEventListener('message', handleExtensionMessage)
     window.postMessage({ source: 'baihuaben-web', type: 'PING' }, '*')
     return () => window.removeEventListener('message', handleExtensionMessage)
-  }, [setTerms])
+  }, [setTermTombstones, setTerms, termTombstones])
 
   useEffect(() => {
     if (!extensionReady) return
-    window.postMessage({ source: 'baihuaben-web', type: 'SYNC_TERMS', terms }, '*')
-  }, [extensionReady, terms])
+    window.postMessage({ source: 'baihuaben-web', type: 'SYNC_ALL', terms, settings }, '*')
+  }, [extensionReady, settings, terms])
+
+  const reconcileProviderSelection = useCallback(({ provider, model }) => {
+    setSettings((current) => {
+      const normalized = normalizeProviderSettings(current)
+      const next = normalizeProviderSettings({ ...normalized, provider, model })
+      return next.provider === normalized.provider && next.model === normalized.model ? current : next
+    })
+  }, [setSettings])
 
   async function addTerm(rawTerm, source = '手动输入', sourceUrl = '') {
-    const term = rawTerm.trim().replace(/\s+/g, ' ')
+    const term = normalizeTermText(rawTerm)
     if (!term) return false
     const duplicate = terms.find((item) => item.term.toLowerCase() === term.toLowerCase())
     if (duplicate) {
@@ -117,26 +126,28 @@ export default function App() {
 
     setBusy('adding')
     const local = getLocalExplanation(term)
-    const item = normalizeIncomingTerm({
+    const now = new Date().toISOString()
+    const item = normalizeTermRecord({
       id: crypto.randomUUID(),
       term,
       ...local,
       category: UNGROUPED,
       source,
       sourceUrl,
+      createdAt: now,
+      updatedAt: now,
       status: local ? 'ready' : 'pending',
-    })
+    }, { now })
     setTerms((current) => [item, ...current])
+    setTermTombstones((current) => clearSupersededTombstones(current, [item]))
 
     if (settings.autoExplain && !local) {
       try {
         const generated = await explainTerm(term, settings)
-        setTerms((current) => current.map((entry) => entry.id === item.id ? {
-          ...entry,
+        setTerms((current) => current.map((entry) => entry.id === item.id ? touchTerm(entry, {
           ...generated,
           category: UNGROUPED,
-          status: 'ready',
-        } : entry))
+        }, 'content') : entry))
         showToast('已经用大白话解释并收录。', 'success')
       } catch (error) {
         showToast(`术语已保存，但解释生成失败：${error.message}`)
@@ -156,12 +167,10 @@ export default function App() {
     setBusy(`explain:${id}`)
     try {
       const generated = await explainTerm(term.term, settings)
-      setTerms((current) => current.map((entry) => entry.id === id ? {
-        ...entry,
+      setTerms((current) => current.map((entry) => entry.id === id ? touchTerm(entry, {
         ...generated,
         category: entry.category,
-        status: 'ready',
-      } : entry))
+      }, 'content') : entry))
       showToast('解释已经补全。', 'success')
     } catch (error) {
       showToast(error.message)
@@ -198,7 +207,8 @@ export default function App() {
 
   function applyGroupingPreview() {
     if (!groupingPreview) return
-    const updatedTerms = applyGroupingChanges(terms, groupingPreview.changes)
+    const groupedTerms = applyGroupingChanges(terms, groupingPreview.changes)
+    const updatedTerms = stampChangedTerms(terms, groupedTerms, 'category')
     const updatedGroups = groupsAfterAutomaticGrouping(
       groups,
       updatedTerms,
@@ -223,7 +233,8 @@ export default function App() {
 
   function undoLastGrouping() {
     if (!lastGroupingChange || (!lastGroupingChange.changes?.length && !lastGroupingChange.previousGroups)) return
-    const restored = applyGroupingChanges(terms, lastGroupingChange.changes, 'reverse')
+    const regrouped = applyGroupingChanges(terms, lastGroupingChange.changes, 'reverse')
+    const restored = stampChangedTerms(terms, regrouped, 'category')
     const occupied = new Set(restored.filter((term) => !isArchived(term)).map((term) => term.category))
     setTerms(restored)
     if (lastGroupingChange.previousGroups) {
@@ -272,7 +283,7 @@ export default function App() {
     if (source === target) return true
     const updated = renameGroupData(groups, terms, source, target)
     setGroups(updated.groups)
-    setTerms(updated.terms)
+    setTerms(stampChangedTerms(terms, updated.terms, ['category', 'archive']))
     setLastGroupingChange(null)
     showToast(`已将“${source}”重命名为“${target}”。`, 'success')
     return true
@@ -282,7 +293,7 @@ export default function App() {
     const count = activeTerms.filter((term) => term.category === target).length
     const updated = deleteGroupData(groups, terms, target)
     setGroups(updated.groups)
-    setTerms(updated.terms)
+    setTerms(stampChangedTerms(terms, updated.terms, 'category'))
     setLastGroupingChange(null)
     showToast(`已删除“${target}”，${count} 个术语回到未分组。`, 'success')
     return true
@@ -293,20 +304,43 @@ export default function App() {
     const count = activeTerms.filter((term) => term.category === source).length
     const updated = mergeGroupsData(groups, terms, source, target)
     setGroups(updated.groups)
-    setTerms(updated.terms)
+    setTerms(stampChangedTerms(terms, updated.terms, ['category', 'archive']))
     setLastGroupingChange(null)
     showToast(`已将“${source}”合并到“${target}”，移动了 ${count} 个术语。`, 'success')
     return true
   }
 
   function saveTerm(updated) {
-    if (selectedTerm?.category !== updated.category) setLastGroupingChange(null)
-    setTerms((current) => current.map((term) => term.id === updated.id ? { ...updated, status: updated.explanation ? 'ready' : 'pending' } : term))
+    if (!selectedTerm) return
+    const normalizedName = normalizeTermText(updated.term)
+    if (!normalizedName) {
+      showToast('请输入术语名称。')
+      return
+    }
+    const duplicate = terms.find((term) => term.id !== updated.id && termKey(term.term) === termKey(normalizedName))
+    if (duplicate) {
+      showToast('已经有同名术语，请换一个名称。')
+      return
+    }
+    const contentChanged = ['term', 'explanation', 'analogy', 'source', 'sourceUrl']
+      .some((field) => String(selectedTerm[field] || '') !== String(updated[field] || ''))
+    const categoryChanged = selectedTerm.category !== updated.category
+    const scopes = [contentChanged ? 'content' : '', categoryChanged ? 'category' : ''].filter(Boolean)
+    const next = scopes.length
+      ? touchTerm(selectedTerm, { ...updated, term: normalizedName }, scopes)
+      : selectedTerm
+    if (categoryChanged) setLastGroupingChange(null)
+    setTerms((current) => current.map((term) => term.id === next.id ? next : term))
+    setTermTombstones((current) => clearSupersededTombstones(current, [next]))
     setSelectedId(null)
     showToast('术语修改已保存。', 'success')
   }
 
   function deleteTerm(id) {
+    const deleted = terms.find((term) => term.id === id)
+    if (!deleted) return
+    const tombstone = createTermTombstone(deleted)
+    setTermTombstones((current) => ({ ...current, [termKey(deleted.term)]: tombstone }))
     setTerms((current) => current.filter((term) => term.id !== id))
     setSelectedId(null)
     showToast('术语已删除。')
@@ -336,20 +370,12 @@ export default function App() {
   }
 
   function reviewTerm(id, remembered) {
-    setTerms((current) => current.map((term) => term.id === id ? {
-      ...term,
-      mastered: remembered,
-      reviewCount: term.reviewCount + 1,
-      lastReviewedAt: new Date().toISOString(),
-    } : term))
+    setTerms((current) => reviewTermInList(current, id, remembered))
   }
 
   function saveSettings(nextSettings) {
     const normalized = normalizeProviderSettings(nextSettings)
     setSettings(normalized)
-    if (extensionReady) {
-      window.postMessage({ source: 'baihuaben-web', type: 'SYNC_ALL', terms, settings: normalized }, '*')
-    }
     showToast('设置已保存在当前浏览器。', 'success')
   }
 
@@ -397,6 +423,7 @@ export default function App() {
         <ModelSettingsPage
           extensionReady={extensionReady}
           onClose={() => setPage('library')}
+          onProviderResolved={reconcileProviderSelection}
           onSave={saveSettings}
           onSyncExtension={syncExtension}
           settings={settings}

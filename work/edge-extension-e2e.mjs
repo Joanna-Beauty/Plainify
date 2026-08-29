@@ -677,21 +677,36 @@ try {
     return true
   })()`)
   assert.equal(reviewTerm, true)
-  const reviewedName = await waitFor(
-    () => evaluate(app, `document.querySelector('.flashcard h1')?.textContent || ''`),
-    '快速复习卡片',
-  )
-  await evaluate(app, `document.querySelector('.reveal-button').click()`)
-  await waitFor(
-    () => evaluate(app, `Boolean(document.querySelector('.flashcard-answer'))`),
-    '复习答案显示',
-  )
-  await evaluate(app, `document.querySelector('.review-known').click()`)
-  await waitFor(
-    () => evaluate(app, `JSON.parse(localStorage.getItem('baihuaben:terms:v1') || '[]')
-      .some((item) => item.term === ${JSON.stringify(reviewedName)} && item.reviewCount > 0 && item.mastered)`),
-    '复习结果保存',
-  )
+  const reviewedNames = []
+  for (let reviewIndex = 0; reviewIndex < 5; reviewIndex += 1) {
+    const reviewedName = await waitFor(
+      () => evaluate(app, `document.querySelector('.flashcard h1')?.textContent || ''`),
+      `快速复习卡片 ${reviewIndex + 1}`,
+    )
+    reviewedNames.push(reviewedName)
+    await evaluate(app, `document.querySelector('.reveal-button').click()`)
+    await waitFor(
+      () => evaluate(app, `Boolean(document.querySelector('.flashcard-answer'))`),
+      `复习答案显示 ${reviewIndex + 1}`,
+    )
+    await evaluate(app, `document.querySelector('.review-known').click()`)
+    await waitFor(
+      () => evaluate(app, reviewIndex === 4
+        ? `Boolean(document.querySelector('.review-complete'))`
+        : `Boolean(document.querySelector('.reveal-button'))`),
+      `复习进度推进 ${reviewIndex + 1}`,
+    )
+  }
+  assert.equal(new Set(reviewedNames).size, 5)
+  const reviewSummary = await evaluate(app, `document.querySelector('.review-complete')?.innerText || ''`)
+  assert.ok(reviewSummary.includes('记住了 5 个，共复习 5 个'))
+  assert.equal(await evaluate(app, `(() => {
+    const reviewed = new Set(${JSON.stringify(reviewedNames)})
+    return JSON.parse(localStorage.getItem('baihuaben:terms:v1') || '[]')
+      .filter((item) => reviewed.has(item.term))
+      .every((item) => item.reviewCount > 0 && item.mastered)
+  })()`), true)
+  console.log('STEP completed a fixed five-term review queue without skips or duplicates')
   await evaluate(app, `document.querySelector('.back-button').click()`)
   await waitFor(
     () => evaluate(app, `Boolean(document.querySelector('.library-page'))`),

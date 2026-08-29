@@ -1,75 +1,45 @@
-function termKey(term) {
-  return String(term || '').trim().replace(/\s+/g, ' ').toLowerCase()
+import {
+  mergeTermRecords,
+  normalizeTermRecord,
+  termKey,
+  tombstoneBlocksTerm,
+} from './terms.js'
+
+function findMatchingIndex(terms, candidate) {
+  const id = String(candidate.id || '')
+  const key = termKey(candidate.term)
+  return terms.findIndex((term) => (
+    (id && term.id === id)
+    || (key && termKey(term.term) === key)
+  ))
 }
 
-function fillMissingFields(primary, fallback) {
-  const explanation = primary.explanation || fallback.explanation || ''
-  const analogy = primary.analogy || fallback.analogy || ''
-  const sourceUrl = primary.sourceUrl || fallback.sourceUrl || ''
-  const source = primary.sourceUrl ? primary.source : fallback.source || primary.source
-  const status = explanation ? 'ready' : primary.status
-  const archived = primary.archived === true || fallback.archived === true
-  const archivedAt = archived ? String(primary.archivedAt || fallback.archivedAt || '') : ''
-  const archivedCategory = archived
-    ? String(primary.archivedCategory || fallback.archivedCategory || primary.category || fallback.category || '未分组')
-    : ''
-  const mastered = archived ? true : Boolean(primary.mastered)
-  if (explanation === primary.explanation
-    && analogy === primary.analogy
-    && sourceUrl === primary.sourceUrl
-    && source === primary.source
-    && status === primary.status
-    && archived === primary.archived
-    && archivedAt === primary.archivedAt
-    && archivedCategory === primary.archivedCategory
-    && mastered === primary.mastered) return primary
-  return {
-    ...primary,
-    explanation,
-    analogy,
-    source,
-    sourceUrl,
-    status,
-    archived,
-    archivedAt,
-    archivedCategory,
-    mastered,
+function upsertTerm(terms, candidate, preferExisting = true) {
+  const index = findMatchingIndex(terms, candidate)
+  if (index < 0) return false
+  const existing = terms[index]
+  terms[index] = preferExisting
+    ? mergeTermRecords(existing, candidate)
+    : mergeTermRecords(candidate, existing)
+  return true
+}
+
+export function mergeExtensionTerms(currentTerms, incomingTerms, tombstones = {}) {
+  const merged = []
+  for (const current of currentTerms) {
+    const normalized = normalizeTermRecord(current, { now: current.createdAt })
+    if (!normalized.term) continue
+    if (!upsertTerm(merged, normalized)) merged.push(normalized)
   }
-}
 
-export function mergeExtensionTerms(currentTerms, incomingTerms) {
-  const incomingByName = new Map()
+  const additions = []
   for (const incoming of incomingTerms) {
-    const key = termKey(incoming.term)
-    if (!key) continue
-    const existing = incomingByName.get(key)
-    incomingByName.set(key, existing ? fillMissingFields(existing, incoming) : incoming)
+    const normalized = normalizeTermRecord(incoming, { now: incoming.createdAt })
+    if (!normalized.term || tombstoneBlocksTerm(tombstones, normalized)) continue
+    if (upsertTerm(merged, normalized)) continue
+    if (!upsertTerm(additions, normalized)) additions.push(normalized)
   }
 
-  const mergedTerms = []
-  const currentIndexByName = new Map()
-  let changed = false
-
-  for (const term of currentTerms) {
-    const key = termKey(term.term)
-    const existingIndex = currentIndexByName.get(key)
-    if (existingIndex !== undefined) {
-      mergedTerms[existingIndex] = fillMissingFields(mergedTerms[existingIndex], term)
-      changed = true
-      continue
-    }
-
-    const incoming = incomingByName.get(key)
-    const merged = incoming ? fillMissingFields(term, incoming) : term
-    if (merged !== term) changed = true
-    currentIndexByName.set(key, mergedTerms.length)
-    mergedTerms.push(merged)
-    incomingByName.delete(key)
-  }
-
-  if (incomingByName.size) {
-    mergedTerms.unshift(...incomingByName.values())
-    changed = true
-  }
-  return changed ? mergedTerms : currentTerms
+  const result = [...additions, ...merged]
+  return JSON.stringify(result) === JSON.stringify(currentTerms) ? currentTerms : result
 }

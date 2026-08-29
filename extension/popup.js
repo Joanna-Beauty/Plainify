@@ -44,7 +44,7 @@ async function checkBackend() {
     if (!response.ok || !data.ok) throw new Error()
     if (data.ready) {
       footer.className = 'ready'
-      backendStatus.textContent = '本机 DeepSeek 服务已就绪'
+      backendStatus.textContent = `本机 ${data.provider || '模型'} 服务已就绪`
       return
     }
     if (data.providerStatus === 'insufficient_balance') {
@@ -52,7 +52,7 @@ async function checkBackend() {
       backendStatus.textContent = '余额不足，充值到账后自动恢复'
     } else if (data.recoverable) {
       footer.className = 'recovering'
-      backendStatus.textContent = 'DeepSeek 暂不可用，正在自动重连'
+      backendStatus.textContent = `${data.provider || '模型'} 暂不可用，正在自动重连`
     } else {
       footer.className = 'error'
       backendStatus.textContent = data.configured ? data.statusMessage : '本机服务已启动，等待配置 Key'

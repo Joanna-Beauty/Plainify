@@ -89,10 +89,12 @@ export default function SettingsPage({
   onSave,
   extensionReady,
   onSyncExtension,
+  onProviderResolved,
   showToast,
 }) {
   const normalizedSettings = useMemo(() => normalizeProviderSettings(settings), [settings])
   const showToastRef = useRef(showToast)
+  const onProviderResolvedRef = useRef(onProviderResolved)
   const apiKeyInputRef = useRef(null)
   const [activeTab, setActiveTab] = useState('general')
   const [draft, setDraft] = useState(normalizedSettings)
@@ -150,6 +152,10 @@ export default function SettingsPage({
     showToastRef.current = showToast
   }, [showToast])
 
+  useEffect(() => {
+    onProviderResolvedRef.current = onProviderResolved
+  }, [onProviderResolved])
+
   useEffect(() => setDraft((current) => normalizeProviderSettings({
     ...current,
     autoExplain: normalizedSettings.autoExplain,
@@ -195,6 +201,7 @@ export default function SettingsPage({
         provider: nextProviderId,
         model: nextModel,
       }))
+      onProviderResolvedRef.current?.({ provider: nextProviderId, model: nextModel })
       return { providers: nextProviders, activeProviderId: nextProviderId, activeModel: nextModel }
     } catch (error) {
       if (error.name === 'AbortError') return null

@@ -11,17 +11,19 @@ import {
 } from '../src/data/grouping.js'
 
 const terms = [
-  { id: 'grouped', term: 'RAG', category: '大模型基础', archived: false },
-  { id: 'ungrouped', term: 'CORS', category: '未分组', archived: false },
+  { id: 'grouped', term: 'RAG', category: '大模型基础', archived: false, mastered: false },
+  { id: 'ungrouped', term: 'CORS', category: '未分组', archived: false, mastered: false },
 ]
 
 const archivedGrouped = archiveTermInList(terms, 'grouped', '2026-08-27T00:00:00.000Z')
 assert.equal(archivedGrouped[0].archived, true)
+assert.equal(archivedGrouped[0].mastered, false)
 assert.equal(archivedCategoryFor(archivedGrouped[0]), '大模型基础')
 assert.deepEqual(groupNamesFromTerms(archivedGrouped), [])
 
 const restoredToExisting = restoreTermInList(archivedGrouped, 'grouped', ['大模型基础'])
 assert.equal(restoredToExisting[0].archived, false)
+assert.equal(restoredToExisting[0].mastered, false)
 assert.equal(restoredToExisting[0].category, '大模型基础')
 
 const archivedUngrouped = archiveTermInList(terms, 'ungrouped', '2026-08-27T00:00:00.000Z')

@@ -1,11 +1,9 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { ArrowLeft, Check, RotateCcw, X } from 'lucide-react'
+import { createReviewQueue } from '../data/review'
 
 export default function ReviewPage({ terms, onReview, onBack }) {
-  const queue = useMemo(() => [...terms]
-    .filter((term) => !term.archived)
-    .sort((a, b) => Number(a.mastered) - Number(b.mastered) || a.reviewCount - b.reviewCount)
-    .slice(0, 5), [terms])
+  const [queue, setQueue] = useState(() => createReviewQueue(terms))
   const [index, setIndex] = useState(0)
   const [revealed, setRevealed] = useState(false)
   const [remembered, setRemembered] = useState(0)
@@ -19,6 +17,7 @@ export default function ReviewPage({ terms, onReview, onBack }) {
   }
 
   function restart() {
+    setQueue(createReviewQueue(terms))
     setIndex(0)
     setRemembered(0)
     setRevealed(false)

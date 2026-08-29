@@ -12,7 +12,8 @@
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
     "lint": "eslint .",
-    "test:release": "node work/model-config-test.mjs && node work/release-contract-test.mjs"
+    "test:core": "node work/archive-test.mjs && node work/grouping-test.mjs && node work/review-test.mjs && node work/term-sync-test.mjs && node work/sync-race-test.cjs && node work/extension-archive-highlight-test.mjs && node work/deepseek-service-test.mjs && node work/deepseek-recovery-test.mjs && node work/core-flow-test.mjs",
+    "test:release": "node work/model-config-test.mjs && npm run test:core && node work/release-contract-test.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
