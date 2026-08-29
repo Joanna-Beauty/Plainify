@@ -48,6 +48,8 @@ function waitForServer(child, expectedText) {
 }
 
 let providerRequestCount = 0
+const completionModels = []
+const completionBodies = []
 const fakeProvider = http.createServer(async (request, response) => {
   providerRequestCount += 1
   const authorized = new Set([
@@ -66,11 +68,17 @@ const fakeProvider = http.createServer(async (request, response) => {
         { id: 'text-embedding-3-small' },
         { id: 'gpt-4o-mini' },
         { id: 'gpt-4.1-mini' },
+        { id: 'gpt-5.2' },
       ],
     }))
     return
   }
   if (request.url === '/v1/chat/completions') {
+    const chunks = []
+    for await (const chunk of request) chunks.push(chunk)
+    const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {}
+    completionModels.push(body.model)
+    completionBodies.push(body)
     response.end(JSON.stringify({ choices: [{ message: { content: '连接成功' } }] }))
     return
   }
@@ -140,7 +148,7 @@ try {
   })
   const discovered = await discoveredResponse.json()
   assert.equal(discoveredResponse.status, 200)
-  assert.deepEqual(discovered.models, ['gpt-4o-mini', 'gpt-4.1-mini'])
+  assert.deepEqual(discovered.models, ['gpt-4o-mini', 'gpt-4.1-mini', 'gpt-5.2'])
   assert.equal(discovered.baseUrl, `http://127.0.0.1:${providerPort}/v1`)
 
   const savedResponse = await fetch(`${baseUrl}/ai/providers/openai/credentials`, {
@@ -157,8 +165,22 @@ try {
   assert.equal(saved.provider.keyLastFour, 'test')
   assert.equal(saved.provider.customBaseUrl, `http://127.0.0.1:${providerPort}/v1`)
   assert.equal(saved.activeModel, 'gpt-4o-mini')
-  assert.deepEqual(saved.models, ['gpt-4o-mini', 'gpt-4.1-mini'])
+  assert.deepEqual(saved.models, ['gpt-4o-mini', 'gpt-4.1-mini', 'gpt-5.2'])
   assert.equal(JSON.stringify(saved).includes('sk-isolated-openai-test'), false)
+  assert.equal(completionModels.at(-1), 'gpt-4o-mini')
+
+  const rejectedModelResponse = await fetch(`${baseUrl}/ai/providers/openai/credentials`, {
+    method: 'POST',
+    headers: websiteHeaders,
+    body: JSON.stringify({
+      apiKey: 'sk-replacement-openai-next',
+      model: 'gpt-not-returned',
+    }),
+  })
+  const rejectedModel = await rejectedModelResponse.json()
+  assert.equal(rejectedModelResponse.status, 400)
+  assert.equal(rejectedModel.code, 'openai_model_not_available')
+  assert.equal((await fs.readFile(configPath, 'utf8')).includes('sk-replacement-openai-next'), false)
 
   const replacedResponse = await fetch(`${baseUrl}/ai/providers/openai/credentials`, {
     method: 'POST',
@@ -173,9 +195,16 @@ try {
   const activated = await (await fetch(`${baseUrl}/ai/active`, {
     method: 'PUT',
     headers: websiteHeaders,
-    body: JSON.stringify({ provider: 'openai', model: 'gpt-4.1-mini' }),
+    body: JSON.stringify({ provider: 'openai', model: 'gpt-5.2' }),
   })).json()
-  assert.equal(activated.activeModel, 'gpt-4.1-mini')
+  assert.equal(activated.activeModel, 'gpt-5.2')
+  assert.equal(completionModels.at(-1), 'gpt-5.2')
+  assert.equal(Object.hasOwn(completionBodies.at(-1), 'temperature'), false)
+
+  const activeModelHealth = await (await fetch(`${baseUrl}/health?probe=1`)).json()
+  assert.equal(activeModelHealth.ready, true)
+  assert.equal(completionModels.at(-1), 'gpt-5.2')
+  assert.equal(Object.hasOwn(completionBodies.at(-1), 'temperature'), false)
 
   const restored = await (await fetch(`${baseUrl}/ai/active`, {
     method: 'PUT',
@@ -256,6 +285,7 @@ try {
   console.log('PASS 新增提供方必须填写 API Key，验证后原子写入隔离配置文件')
   console.log('PASS 未填写 Key 可读取官方预置模型，自定义地址与临时 Key 优先用于动态发现')
   console.log('PASS OpenAI 模型列表动态获取并过滤非对话模型')
+  console.log('PASS 保存、切换和健康检查都验证当前选定模型')
   console.log('PASS 提供方仅保留 DeepSeek/OpenAI，恢复模型使用适配器默认值')
   console.log('PASS API 响应不回传完整 Key，扩展来源不能修改配置')
   console.log('PASS Key 可替换、按 0600 权限保存并在后端重启后恢复')

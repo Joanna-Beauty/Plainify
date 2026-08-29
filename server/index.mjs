@@ -335,7 +335,8 @@ function scheduleRecoveryProbe(providerId = activeProviderId()) {
   recoveryTimer.unref?.()
 }
 
-async function requestProvider(pathname, init, config = requireConfig()) {
+async function requestProvider(pathname, init, config = requireConfig(), options = {}) {
+  const updateState = options.updateState !== false
   if (config.mock) return null
   let response
   try {
@@ -355,18 +356,18 @@ async function requestProvider(pathname, init, config = requireConfig()) {
       timedOut ? `${config.providerId}_timeout` : `${config.providerId}_unreachable`,
       { recoverable: true, retryAfterMs: recoveryDelays()[0] },
     )
-    setProviderFailure(config.providerId, apiError)
+    if (updateState) setProviderFailure(config.providerId, apiError)
     throw apiError
   }
 
   const text = await response.text()
   if (!response.ok) {
     const apiError = classifyProviderFailure(config.provider, response.status, text)
-    setProviderFailure(config.providerId, apiError)
+    if (updateState) setProviderFailure(config.providerId, apiError)
     throw apiError
   }
 
-  if (pathname === '/chat/completions') setProviderReady(config.providerId)
+  if (pathname === '/chat/completions' && updateState) setProviderReady(config.providerId)
 
   try {
     return JSON.parse(text)
@@ -392,15 +393,19 @@ async function probeProvider(providerId = activeProviderId(), { force = false } 
 
   providerProbePromise = (async () => {
     try {
+      const model = providerId === activeProviderId()
+        ? normalizeModel(providerId, process.env.PLAINIFY_AI_MODEL)
+        : config.provider.defaultModel
+      const body = {
+        model,
+        messages: [{ role: 'user', content: '只回复 1' }],
+        max_tokens: 1,
+      }
+      if (!/^(?:o[134](?:-|$)|gpt-5)/i.test(model)) body.temperature = 0
       await requestProvider('/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: config.provider.defaultModel,
-          messages: [{ role: 'user', content: '只回复 1' }],
-          temperature: 0,
-          max_tokens: 1,
-        }),
+        body: JSON.stringify(body),
       }, config)
     } catch {
       // requestProvider records the detailed recoverable state.
@@ -446,15 +451,33 @@ async function requestCompletion(messages, model, maxTokens = 900, providerId = 
   return content
 }
 
+async function validateProviderModel(config, model) {
+  if (config.mock) return
+  const body = {
+    model,
+    messages: [{ role: 'user', content: '只回复 1' }],
+    max_tokens: 20,
+  }
+  if (!/^(?:o[134](?:-|$)|gpt-5)/i.test(model)) body.temperature = 0
+  const data = await requestProvider('/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }, config, { updateState: false })
+  if (!data.choices?.[0]?.message?.content) {
+    throw new ApiError(502, `${config.provider.name} 当前模型没有返回可用内容`, 'empty_model_response')
+  }
+}
+
 function isUsableModel(providerId, modelId) {
   if (providerId !== 'openai') return true
   return /^(?:gpt-|chatgpt-|o[134](?:-|$))/i.test(modelId)
     && !/(?:realtime|audio|transcribe|tts|image|search|embedding|moderation)/i.test(modelId)
 }
 
-async function listProviderModels(config) {
+async function listProviderModels(config, options = {}) {
   if (!config.configured || config.mock) return config.provider.fallbackModels
-  const data = await requestProvider('/models', { method: 'GET', headers: {} }, config)
+  const data = await requestProvider('/models', { method: 'GET', headers: {} }, config, options)
   const models = Array.isArray(data.data)
     ? [...new Set(data.data
       .map((item) => String(item.id || '').trim())
@@ -564,9 +587,17 @@ async function saveCredential(providerId, input = {}) {
     apiKey: secret,
     ...(hasBaseUrl ? { baseUrl: input.baseUrl } : {}),
   })
-  const models = await listProviderModels(candidate)
+  const models = await listProviderModels(candidate, { updateState: false })
   const currentProviderModel = activeProviderId() === provider.id ? process.env.PLAINIFY_AI_MODEL : ''
   const selectedModel = normalizeModel(provider.id, input.model || currentProviderModel || provider.defaultModel)
+  if (!models.includes(selectedModel)) {
+    throw new ApiError(
+      400,
+      `当前 API 地址没有返回模型 ${selectedModel}，请先获取可用模型并选择一个`,
+      `${provider.id}_model_not_available`,
+    )
+  }
+  await validateProviderModel(candidate, selectedModel)
   const updates = {
     [provider.envKey]: secret,
     PLAINIFY_AI_PROVIDER: provider.id,
@@ -587,7 +618,9 @@ async function routeRequest(request, response, origin) {
 
   if (request.method === 'GET' && url.pathname === '/api/health') {
     const config = getConfig()
-    if (url.searchParams.get('probe') === '1' && config.configured) await probeProvider(config.providerId)
+    if (url.searchParams.get('probe') === '1' && config.configured) {
+      await probeProvider(config.providerId, { force: true })
+    }
     sendJson(response, 200, {
       ok: true,
       ...providerHealth(config),
@@ -636,7 +669,7 @@ async function routeRequest(request, response, origin) {
         ...(String(body.apiKey || '').trim() ? { apiKey: body.apiKey } : {}),
         ...(Object.hasOwn(body, 'baseUrl') ? { baseUrl: body.baseUrl } : {}),
       })
-      const models = await listProviderModels(config)
+      const models = await listProviderModels(config, { updateState: false })
       sendJson(response, 200, {
         ok: true,
         configured: config.configured,
@@ -681,9 +714,19 @@ async function routeRequest(request, response, origin) {
     requireSettingsOrigin(origin)
     const body = await readJson(request)
     const provider = providerDefinition(body.provider)
-    requireConfig(provider.id)
+    const config = requireConfig(provider.id)
     const model = normalizeModel(provider.id, body.model)
+    const models = await listProviderModels(config, { updateState: false })
+    if (!models.includes(model)) {
+      throw new ApiError(
+        400,
+        `当前 API 地址没有返回模型 ${model}，请先获取可用模型并选择一个`,
+        `${provider.id}_model_not_available`,
+      )
+    }
+    await validateProviderModel(config, model)
     await persistConfigValues({ PLAINIFY_AI_PROVIDER: provider.id, PLAINIFY_AI_MODEL: model })
+    setProviderReady(provider.id, `${provider.name} · ${model} 已连接`)
     sendJson(response, 200, { ok: true, activeProvider: provider.id, activeModel: model }, origin)
     return
   }
