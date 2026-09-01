@@ -25,10 +25,22 @@ assert.match(envExample, /DEEPSEEK_API_KEY=sk-your-deepseek-key/)
 assert.match(envExample, /OPENAI_API_KEY=sk-your-openai-key/)
 assert.equal(envExample.includes('.env.local'), false)
 
-const ignoredPath = execFileSync('git', ['check-ignore', '.env.local'], { cwd: root, encoding: 'utf8' }).trim()
-assert.equal(ignoredPath, '.env.local')
-const trackedFiles = execFileSync('git', ['ls-files'], { cwd: root, encoding: 'utf8' }).split('\n')
-assert.equal(trackedFiles.includes('.env.local'), false)
+const packageMetadata = JSON.parse(read('package.json'))
+assert.equal(packageMetadata.license, 'MIT')
+assert.match(read('LICENSE'), /^MIT License$/m)
+
+if (fs.existsSync(path.join(root, '.git'))) {
+  const ignoredPath = execFileSync('git', ['check-ignore', '.env.local'], { cwd: root, encoding: 'utf8' }).trim()
+  assert.equal(ignoredPath, '.env.local')
+  const trackedFiles = execFileSync('git', ['ls-files'], { cwd: root, encoding: 'utf8' }).split('\n')
+  assert.equal(trackedFiles.includes('.env.local'), false)
+} else {
+  const ignorePatterns = read('.gitignore')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#'))
+  assert.ok(ignorePatterns.includes('.env.local'), 'download archive must ignore .env.local')
+}
 
 const extensionArchive = path.join(root, 'outputs', 'baihuaben-extension.zip')
 if (fs.existsSync(extensionArchive)) {
