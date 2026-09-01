@@ -27,7 +27,16 @@ assert.equal(envExample.includes('.env.local'), false)
 
 const packageMetadata = JSON.parse(read('package.json'))
 assert.equal(packageMetadata.license, 'MIT')
+for (const [dependency, version] of Object.entries({
+  ...packageMetadata.dependencies,
+  ...packageMetadata.devDependencies,
+})) {
+  assert.match(version, /^\d+\.\d+\.\d+$/, `${dependency} must use an exact version`)
+}
 assert.match(read('LICENSE'), /^MIT License$/m)
+assert.match(read('SECURITY.md'), /Private vulnerability reporting/)
+assert.match(read('.github/workflows/ci.yml'), /npm run test:release/)
+assert.match(read('.github/dependabot.yml'), /package-ecosystem: npm/)
 
 if (fs.existsSync(path.join(root, '.git'))) {
   const ignoredPath = execFileSync('git', ['check-ignore', '.env.local'], { cwd: root, encoding: 'utf8' }).trim()
@@ -42,14 +51,14 @@ if (fs.existsSync(path.join(root, '.git'))) {
   assert.ok(ignorePatterns.includes('.env.local'), 'download archive must ignore .env.local')
 }
 
-const extensionArchive = path.join(root, 'outputs', 'baihuaben-extension.zip')
-if (fs.existsSync(extensionArchive)) {
-  const archiveEntries = execFileSync('unzip', ['-Z1', extensionArchive], { encoding: 'utf8' })
-  assert.doesNotMatch(archiveEntries, /(^|\/)\.env(?:\.local)?$/m)
-  const archivedContentScript = execFileSync('unzip', ['-p', extensionArchive, 'extension/content.js'], { encoding: 'utf8' })
-  assert.match(archivedContentScript, /closeButton\.title = '关闭解释栏'/)
-  assert.match(archivedContentScript, /archiveButton\.title = '归档术语'/)
-}
+const extensionArchive = path.join(root, 'outputs', 'plainify-extension.zip')
+assert.ok(fs.existsSync(extensionArchive), 'release extension archive is required')
+const archiveEntries = execFileSync('unzip', ['-Z1', extensionArchive], { encoding: 'utf8' })
+assert.doesNotMatch(archiveEntries, /(^|\/)\.env(?:\.local)?$/m)
+assert.doesNotMatch(archiveEntries, /(^|\/)(?:\.DS_Store|__MACOSX)(?:\/|$)/m)
+const archivedContentScript = execFileSync('unzip', ['-p', extensionArchive, 'extension/content.js'], { encoding: 'utf8' })
+assert.match(archivedContentScript, /closeButton\.title = '关闭解释栏'/)
+assert.match(archivedContentScript, /archiveButton\.title = '归档术语'/)
 
 const extensionContent = read('extension/content.js')
 assert.match(extensionContent, /closeButton\.title = '关闭解释栏'/)
@@ -79,25 +88,31 @@ for (const iconPath of Object.values(expectedExtensionIcons)) {
 }
 assert.equal(read('extension/icons/plainify.svg'), read('public/favicon.svg'))
 assert.match(read('extension/popup.html'), /class="mark" src="icons\/plainify\.svg"/)
-const installedExtension = path.join(root, 'outputs', 'extension')
-if (fs.existsSync(installedExtension)) {
-  assert.equal(read('outputs/extension/manifest.json'), read('extension/manifest.json'))
-  assert.equal(read('outputs/extension/popup.html'), read('extension/popup.html'))
-  assert.equal(read('outputs/extension/popup.css'), read('extension/popup.css'))
-  for (const iconPath of Object.values(expectedExtensionIcons)) {
-    assert.deepEqual(
-      fs.readFileSync(path.join(installedExtension, iconPath)),
-      fs.readFileSync(path.join(root, 'extension', iconPath)),
-    )
-  }
+const archivedManifest = JSON.parse(execFileSync('unzip', ['-p', extensionArchive, 'extension/manifest.json'], { encoding: 'utf8' }))
+assert.deepEqual(archivedManifest, extensionManifest)
+for (const iconPath of Object.values(expectedExtensionIcons)) {
+  assert.match(archiveEntries, new RegExp(`^extension/${iconPath}$`, 'm'))
 }
-if (fs.existsSync(extensionArchive)) {
-  const archivedManifest = JSON.parse(execFileSync('unzip', ['-p', extensionArchive, 'extension/manifest.json'], { encoding: 'utf8' }))
-  assert.deepEqual(archivedManifest, extensionManifest)
-  const archiveEntries = execFileSync('unzip', ['-Z1', extensionArchive], { encoding: 'utf8' })
-  for (const iconPath of Object.values(expectedExtensionIcons)) {
-    assert.match(archiveEntries, new RegExp(`^extension/${iconPath}$`, 'm'))
-  }
+const listFiles = (directory) => fs.readdirSync(directory, { withFileTypes: true })
+  .flatMap((entry) => {
+    const entryPath = path.join(directory, entry.name)
+    return entry.isDirectory() ? listFiles(entryPath) : [entryPath]
+  })
+const extensionRoot = path.join(root, 'extension')
+const sourceExtensionFiles = listFiles(extensionRoot)
+  .map((file) => path.relative(root, file).split(path.sep).join('/'))
+  .sort()
+const archivedExtensionFiles = archiveEntries
+  .split(/\r?\n/)
+  .filter((entry) => entry && !entry.endsWith('/'))
+  .sort()
+assert.deepEqual(archivedExtensionFiles, sourceExtensionFiles, 'extension archive file list must match extension source')
+for (const sourceFile of sourceExtensionFiles) {
+  assert.deepEqual(
+    execFileSync('unzip', ['-p', extensionArchive, sourceFile]),
+    fs.readFileSync(path.join(root, sourceFile)),
+    `${sourceFile} in release archive must match extension source`,
+  )
 }
 const settingsPage = read('src/pages/SettingsPage.jsx')
 assert.match(settingsPage, /https:\/\/my\.feishu\.cn\/share\/base\/form\/shrcnNIBOZIPMz8pMKyFIqZLtmb/)

@@ -40,7 +40,7 @@
 
 ## 浏览器扩展与本机服务
 
-- 扩展源码改动只在 `extension/` 中完成；不要直接修改 `outputs/extension/`。
+- 扩展源码改动只在 `extension/` 中完成；`outputs/plainify-extension.zip` 是从该目录生成的发布物，不要直接修改压缩包内容。
 - 扩展改动需检查 `manifest.json` 权限、网页内容脚本、弹窗和网站同步协议是否仍一致。
 - 后端或启动逻辑改动后，按需运行 `npm run service:install` 应用到 macOS 常驻服务，并用
   `npm run service:status` 检查状态。
