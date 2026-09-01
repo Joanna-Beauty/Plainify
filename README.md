@@ -266,8 +266,6 @@ npm run service:status
 
 **得到的帮助：** 示例解释会说明 JavaScript 是让网页能够响应点击、检查表单和自动更新内容的编程语言，不只给出缩写或字面翻译。
 
-![在 MDN 技术文档中解释 JavaScript](docs/assets/scenario-technical-docs.png)
-
 ![在 MDN 中选中 JavaScript、生成解释并加入术语库](docs/assets/scenario-technical-docs.gif)
 
 完整的选中、解释和收录过程见[第一次解释网页内容](#第一次解释网页内容)中的 GIF。
@@ -282,13 +280,9 @@ npm run service:status
 
 **怎么操作：** 选中 `precipitation`，点击 **用大白话解释**。看到“降水，以及化学语境中的沉淀”等通俗解释后，点击 **加入术语库**。
 
-![在 NASA 英文文章中查看 precipitation 的中文解释](docs/assets/scenario-english-article.png)
-
 ![在 NASA 英文文章中解释并保存 precipitation](docs/assets/scenario-english-article.gif)
 
 之后打开 [NOAA JetStream 的 Precipitation 页面](https://www.noaa.gov/jetstream/precipitation)，同一个词会自动显示黄色高亮。鼠标悬停可复习释义，点击可固定解释；确定已经掌握后点击 **归档术语**。
-
-![在另一篇英文文章中自动高亮 precipitation](docs/assets/scenario-english-highlight.png)
 
 连续的高亮、悬停、固定和归档操作见[在网页中复习术语](#在网页中复习术语)中的 GIF。
 
@@ -303,8 +297,6 @@ npm run service:status
 **怎么操作：** 选中页面标题中的“市盈率”，点击 **用大白话解释**。解释会结合当前概念说明它大致是在比较股价与公司赚钱能力，再用小店回本时间作类比。
 
 **得到的帮助：** 不只看到 P/E 的翻译，还能先理解这个指标想比较什么，再决定是否继续阅读专业定义。
-
-![在财经页面中用大白话解释市盈率](docs/assets/scenario-finance.png)
 
 ![在财经页面中选中市盈率并生成结合上下文的解释](docs/assets/scenario-finance.gif)
 
@@ -322,8 +314,6 @@ npm run service:status
 
 **得到的帮助：** 模型会把抽象原则改写成更短的日常表达，帮助定位还需要向专业人士确认的部分。
 
-![用于演示长文解释的 W3C 隐私原则公开页面](docs/assets/scenario-privacy-policy.png)
-
 ![在 W3C 隐私原则中选择长句并查看大白话解释](docs/assets/scenario-privacy-policy.gif)
 
 > 解释只能辅助阅读，不能替代法律意见。涉及同意授权、合同责任或个人权益时，应以原文和专业人士意见为准。
@@ -340,8 +330,6 @@ npm run service:status
 
 **得到的帮助：** 先把英文入口转换成容易理解的中文，再回到官方页面逐项核对材料，减少点错栏目。
 
-![用于演示办事指南阅读的 USAGov 护照公开页面](docs/assets/scenario-government-guide.png)
-
 ![在 USAGov 办事指南中解释并保存申请入口](docs/assets/scenario-government-guide.gif)
 
 > 政策和办理要求会变化。加简大白话只帮助理解文字，实际办理应以政府网站的最新原文为准。
@@ -357,8 +345,6 @@ npm run service:status
 **怎么操作：** 如果内容在浏览器里，直接选中并解释；如果来自本地笔记，就在术语库顶部输入并点击 **解释并收录**。之后使用 **整理未分组** 把相关术语归到同一宽泛分组。
 
 **得到的帮助：** 把缩写、通俗解释和生活化类比集中保存，下一次在网页中遇到同名词时直接高亮复习。
-
-![在术语库中集中管理工作术语](docs/assets/plainify-library-mobile.png)
 
 ![在术语库中手动输入 SLA 并生成通俗解释](docs/assets/scenario-workplace-jargon.gif)
 
