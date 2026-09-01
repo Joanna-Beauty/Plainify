@@ -3,3 +3,7 @@
 dist/
 node_modules/
 .DS_Store
+
+# Local planning documents
+/docs/需求清单.md
+/前端优化的可选方案.md
