@@ -118,7 +118,7 @@ export default function LibraryPage({
             <p>已经熟悉的术语收在这里，需要时可以恢复。</p>
           </div>
         </header>
-      ) : <h1 className="sr-only">你的个人术语库</h1>}
+      ) : null}
 
       {!isArchiveView ? (
         <>

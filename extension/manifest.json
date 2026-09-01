@@ -1,8 +1,15 @@
 {
   "manifest_version": 3,
   "name": "加简大白话 · Plainify",
-  "version": "0.4.10",
+  "version": "0.4.11",
   "description": "查询技术词的大白话解释与生活化类比，确认后收录并在网页中高亮复习。",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "24": "icons/icon-24.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
   "permissions": ["storage", "contextMenus", "activeTab", "tabs", "scripting"],
   "host_permissions": ["<all_urls>"],
   "background": {
@@ -10,7 +17,12 @@
   },
   "action": {
     "default_title": "加简大白话 · Plainify｜你的个人术语库",
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "24": "icons/icon-24.png",
+      "32": "icons/icon-32.png"
+    }
   },
   "content_scripts": [
     {

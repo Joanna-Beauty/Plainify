@@ -6,14 +6,14 @@
 :root {
   color: #191a17;
   background: #ffffff;
+  /* Keep the UI type contract aligned with the two extension surfaces. */
   --font-family-sans: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
-  --font-family-serif: "Songti SC", "Noto Serif SC", Georgia, serif;
+  --font-family-brand: "Songti SC", "Noto Serif SC", Georgia, serif;
   --font-family-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  --font-family-latin: Arial, sans-serif;
-  --font-size-caption: 11px;
-  --font-size-small: 12px;
-  --font-size-label: 13px;
-  --font-size-body: 14px;
+  --font-size-caption: 12px;
+  --font-size-small: 13px;
+  --font-size-label: 14px;
+  --font-size-body: 15px;
   --font-size-body-large: 16px;
   --font-size-heading-small: 18px;
   --font-size-heading-medium: 20px;
@@ -23,7 +23,6 @@
   --font-weight-regular: 400;
   --font-weight-medium: 500;
   --font-weight-semibold: 600;
-  --font-weight-bold: 700;
   --line-height-none: 1;
   --line-height-tight: 1.3;
   --line-height-snug: 1.4;
@@ -66,6 +65,17 @@ textarea,
 select {
   color: inherit;
   font: inherit;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+strong,
+b {
+  font-weight: var(--font-weight-semibold);
 }
 
 button {
@@ -137,8 +147,7 @@ textarea:focus-visible,
   align-items: center;
   gap: 11px;
   min-width: 0;
-  font-family: var(--font-family-serif);
-  font-weight: var(--font-weight-bold);
+  font-family: var(--font-family-brand);
 }
 
 .app-identity-copy {
@@ -157,7 +166,8 @@ textarea:focus-visible,
 
 .brand-tagline {
   color: #4f544c;
-  font-size: var(--font-size-body);
+  font-size: var(--font-size-heading-small);
+  font-weight: var(--font-weight-regular);
   line-height: var(--line-height-tight);
   white-space: nowrap;
 }
@@ -191,16 +201,11 @@ textarea:focus-visible,
 }
 
 .brand-title {
-  font-size: var(--font-size-body);
+  font-family: inherit;
+  font-size: var(--font-size-heading-small);
+  font-weight: var(--font-weight-semibold);
   line-height: var(--line-height-tight);
   white-space: nowrap;
-}
-
-.brand-title small {
-  color: #5f645c;
-  font-family: var(--font-family-latin);
-  font-size: var(--font-size-caption);
-  font-weight: var(--font-weight-bold);
 }
 
 .brand-mark {
@@ -264,7 +269,7 @@ textarea:focus-visible,
 .side-nav-item.active {
   color: var(--ink);
   background: var(--soft);
-  font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-semibold);
 }
 
 .sidebar.is-collapsed .side-nav-item {
@@ -335,7 +340,7 @@ textarea:focus-visible,
 .social-copy strong {
   color: #3d413b;
   font-size: var(--font-size-caption);
-  font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-semibold);
 }
 
 .social-copy span {
@@ -345,7 +350,7 @@ textarea:focus-visible,
 
 .social-compact-label {
   font-size: var(--font-size-caption);
-  font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-semibold);
 }
 
 .mobile-social-profile {
@@ -439,9 +444,9 @@ textarea:focus-visible,
 .settings-heading h1,
 .review-complete h1 {
   margin: 0;
-  font-family: var(--font-family-serif);
+  font-family: var(--font-family-sans);
   font-size: var(--font-size-display);
-  font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-semibold);
   line-height: var(--line-height-tight);
 }
 
@@ -494,7 +499,7 @@ textarea:focus-visible,
   color: var(--ink);
   background: var(--yellow);
   font-size: var(--font-size-label);
-  font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-semibold);
   transition: transform 140ms ease, background-color 140ms ease;
 }
 
@@ -535,7 +540,7 @@ textarea:focus-visible,
 .first-run-heading > div:first-child > span {
   color: #8b751b;
   font-size: var(--font-size-caption);
-  font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-semibold);
 }
 
 .first-run-heading h2 {
@@ -650,7 +655,7 @@ textarea:focus-visible,
   justify-self: start;
   margin-top: 2px;
   font-size: var(--font-size-caption);
-  font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-semibold);
 }
 
 .first-run-steps li > button {
@@ -689,7 +694,7 @@ textarea:focus-visible,
   color: #6f5c12;
   background: #fff2b5;
   font-size: var(--font-size-caption);
-  font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-semibold);
 }
 
 .first-run-collapsed-copy {
@@ -718,7 +723,7 @@ textarea:focus-visible,
   color: #5d501d;
   background: #fffdf4;
   font-size: var(--font-size-caption);
-  font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-semibold);
 }
 
 .library-layout {
@@ -749,7 +754,7 @@ textarea:focus-visible,
   margin: 0;
   color: var(--ink);
   font-size: var(--font-size-body-large);
-  font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-semibold);
   line-height: var(--line-height-snug);
 }
 
@@ -973,7 +978,7 @@ textarea:focus-visible,
 .new-group-form label {
   color: #575c54;
   font-size: var(--font-size-caption);
-  font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-semibold);
 }
 
 .new-group-form > div {
@@ -1225,7 +1230,7 @@ textarea:focus-visible,
   margin: 0;
   overflow-wrap: anywhere;
   font-size: var(--font-size-heading-small);
-  font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-semibold);
   line-height: var(--line-height-tight);
 }
 
@@ -1280,8 +1285,8 @@ textarea:focus-visible,
   max-width: 750px;
   margin: 10px 0 11px;
   color: #4e534c;
-  font-size: var(--font-size-label);
-  line-height: var(--line-height-relaxed);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
 }
 
 .term-analogy {
@@ -1290,7 +1295,7 @@ textarea:focus-visible,
   padding-left: 12px;
   border-left: 3px solid #d9ddd5;
   color: #7c8179;
-  font-size: var(--font-size-small);
+  font-size: var(--font-size-body);
   line-height: var(--line-height-body);
 }
 
@@ -1317,7 +1322,7 @@ textarea:focus-visible,
   color: #725e16;
   background: #fff7ce;
   font-size: var(--font-size-caption);
-  font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-semibold);
 }
 
 .text-button:disabled {
@@ -1440,7 +1445,7 @@ textarea:focus-visible,
 .category-row.active {
   color: var(--ink);
   background: var(--soft);
-  font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-semibold);
 }
 
 .category-row span {
@@ -1506,7 +1511,7 @@ textarea:focus-visible,
 
 .archive-entry strong {
   font-size: var(--font-size-small);
-  font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-semibold);
 }
 
 .archive-entry small {
@@ -1544,7 +1549,7 @@ textarea:focus-visible,
   margin: 0;
   color: var(--ink);
   font-size: var(--font-size-label);
-  font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-semibold);
 }
 
 .archive-group > header span {
@@ -1589,7 +1594,7 @@ textarea:focus-visible,
   color: var(--ink);
   background: var(--yellow);
   font-size: var(--font-size-caption);
-  font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-semibold);
 }
 
 .empty-state {
@@ -1780,7 +1785,7 @@ textarea:focus-visible,
   color: #ffe684;
   background: #343832;
   font-size: var(--font-size-caption);
-  font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-semibold);
   white-space: nowrap;
 }
 
@@ -1869,7 +1874,7 @@ textarea:focus-visible,
   color: #4c5149;
   background: #ffffff;
   font-size: var(--font-size-small);
-  font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-semibold);
 }
 
 .flashcard-answer {
@@ -1917,7 +1922,7 @@ textarea:focus-visible,
   min-height: 45px;
   border-radius: 6px;
   font-size: var(--font-size-label);
-  font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-semibold);
 }
 
 .review-again {
@@ -2296,7 +2301,7 @@ textarea:focus-visible,
   color: #665714;
   background: #fff1ad;
   font-size: var(--font-size-caption);
-  font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-semibold);
 }
 
 .extension-install-guide li p {
@@ -2393,7 +2398,7 @@ textarea:focus-visible,
   color: #23251f;
   background: var(--yellow-soft);
   font-size: var(--font-size-body);
-  font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-semibold);
 }
 
 .provider-copy {
@@ -2703,19 +2708,14 @@ textarea:focus-visible,
   .app-header .brand-title {
     max-width: 100%;
     overflow: hidden;
-    font-size: var(--font-size-body);
+    font-size: var(--font-size-heading-small);
     text-overflow: ellipsis;
-  }
-
-  .app-header .brand-title small {
-    font-size: var(--font-size-caption);
   }
 
   .brand-tagline {
     color: #73786f;
-    font-family: var(--font-family-sans);
-    font-size: var(--font-size-caption);
-    font-weight: var(--font-weight-medium);
+    font-size: var(--font-size-heading-small);
+    font-weight: var(--font-weight-regular);
   }
 
   .app-header .brand-mark {
@@ -2924,6 +2924,16 @@ textarea:focus-visible,
   .toast {
     right: 16px;
     bottom: 75px;
+  }
+}
+
+@media (max-width: 350px) {
+  .mobile-social-profile .social-compact-label {
+    display: none;
+  }
+
+  .mobile-social-profile {
+    padding-right: 3px;
   }
 }
 
@@ -3183,7 +3193,7 @@ textarea:focus-visible,
   color: var(--provider-color);
   background: color-mix(in srgb, var(--provider-color) 9%, #ffffff);
   font-size: var(--font-size-small);
-  font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-semibold);
 }
 
 .provider-summary-copy {
@@ -3305,7 +3315,7 @@ textarea:focus-visible,
   gap: 5px;
   color: #705f16;
   font-size: var(--font-size-small);
-  font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-semibold);
 }
 
 .active-provider-detail dl {
@@ -3727,12 +3737,12 @@ textarea:focus-visible,
 
 .settings-dialog {
   display: grid;
-  grid-template-rows: 82px minmax(0, 1fr);
-  width: min(1540px, calc(100vw - 28px));
-  height: min(980px, calc(100vh - 28px));
+  grid-template-rows: 70px minmax(0, 1fr);
+  width: min(1120px, calc(100vw - 64px));
+  height: min(760px, calc(100vh - 64px));
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.9);
-  border-radius: 30px;
+  border-radius: 16px;
   background: #ffffff;
   box-shadow: 0 24px 70px rgba(25, 28, 24, 0.23);
   animation: settings-dialog-in 180ms ease-out;
@@ -3743,7 +3753,7 @@ textarea:focus-visible,
   align-items: center;
   justify-content: space-between;
   gap: 24px;
-  padding: 0 32px 0 38px;
+  padding: 0 22px 0 28px;
 }
 
 .settings-dialog-header h1 {
@@ -3772,7 +3782,7 @@ textarea:focus-visible,
 
 .settings-dialog-body {
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-columns: 220px minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
 }
@@ -3782,14 +3792,14 @@ textarea:focus-visible,
   align-content: start;
   gap: 6px;
   min-width: 0;
-  padding: 22px 24px 36px;
+  padding: 14px 16px 28px;
   overflow-y: auto;
 }
 
 .settings-dialog .settings-tabs button {
-  gap: 13px;
-  min-height: 58px;
-  padding: 0 20px;
+  gap: 11px;
+  min-height: 50px;
+  padding: 0 16px;
   border-radius: 8px;
   color: #242721;
   font-size: var(--font-size-body-large);
@@ -3814,10 +3824,10 @@ textarea:focus-visible,
 }
 
 .settings-dialog .settings-pane {
-  width: min(1040px, calc(100% - 64px));
+  width: min(780px, calc(100% - 48px));
   min-width: 0;
   margin: 0 auto;
-  padding: 18px 0 64px;
+  padding: 14px 0 48px;
 }
 
 .settings-dialog .settings-pane-heading {
@@ -4624,7 +4634,7 @@ textarea:focus-visible,
   gap: 4px;
   color: #756316;
   font-size: var(--font-size-caption);
-  font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-semibold);
   text-decoration: none;
 }
 

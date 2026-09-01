@@ -2,12 +2,12 @@
 #baihuaben-tooltip,
 #baihuaben-selection-button,
 #baihuaben-preview {
+  /* Keep this type contract aligned with the website and extension popup. */
   --plainify-font-family-sans: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", Arial, sans-serif !important;
-  --plainify-font-family-latin: Arial, sans-serif !important;
-  --plainify-font-size-caption: 11px !important;
-  --plainify-font-size-small: 12px !important;
-  --plainify-font-size-label: 13px !important;
-  --plainify-font-size-body: 14px !important;
+  --plainify-font-size-caption: 12px !important;
+  --plainify-font-size-small: 13px !important;
+  --plainify-font-size-label: 14px !important;
+  --plainify-font-size-body: 15px !important;
   --plainify-font-size-body-large: 16px !important;
   --plainify-font-size-heading-small: 18px !important;
   --plainify-font-size-heading-medium: 20px !important;
@@ -17,7 +17,6 @@
   --plainify-font-weight-regular: 400 !important;
   --plainify-font-weight-medium: 500 !important;
   --plainify-font-weight-semibold: 600 !important;
-  --plainify-font-weight-bold: 700 !important;
   --plainify-line-height-none: 1 !important;
   --plainify-line-height-tight: 1.3 !important;
   --plainify-line-height-snug: 1.4 !important;
@@ -67,7 +66,7 @@
   background: #22241f !important;
   box-shadow: 0 14px 36px rgba(20, 22, 18, 0.24) !important;
   font-family: var(--plainify-font-family-sans) !important;
-  font-size: var(--plainify-font-size-small) !important;
+  font-size: var(--plainify-font-size-body) !important;
   font-style: normal !important;
   font-weight: var(--plainify-font-weight-regular) !important;
   line-height: var(--plainify-line-height-body) !important;
@@ -81,8 +80,8 @@
   display: block !important;
   margin: 0 0 5px !important;
   color: #ffd84d !important;
-  font-size: var(--plainify-font-size-small) !important;
-  font-weight: var(--plainify-font-weight-bold) !important;
+  font-size: var(--plainify-font-size-body) !important;
+  font-weight: var(--plainify-font-weight-semibold) !important;
 }
 
 #baihuaben-tooltip section {
@@ -102,7 +101,7 @@
   margin: 0 0 2px !important;
   color: #aeb3aa !important;
   font-size: var(--plainify-font-size-caption) !important;
-  font-weight: var(--plainify-font-weight-bold) !important;
+  font-weight: var(--plainify-font-weight-medium) !important;
   line-height: var(--plainify-line-height-snug) !important;
 }
 
@@ -159,7 +158,7 @@
   border-radius: 5px !important;
   color: #c8ccc5 !important;
   background: transparent !important;
-  font-family: var(--plainify-font-family-latin) !important;
+  font-family: var(--plainify-font-family-sans) !important;
   font-size: var(--plainify-font-size-heading-medium) !important;
   font-weight: var(--plainify-font-weight-regular) !important;
   line-height: var(--plainify-line-height-none) !important;
@@ -209,8 +208,8 @@
   color: #191a17 !important;
   background: #ffd84d !important;
   font-family: var(--plainify-font-family-sans) !important;
-  font-size: var(--plainify-font-size-caption) !important;
-  font-weight: var(--plainify-font-weight-bold) !important;
+  font-size: var(--plainify-font-size-small) !important;
+  font-weight: var(--plainify-font-weight-semibold) !important;
   line-height: var(--plainify-line-height-none) !important;
   cursor: pointer !important;
 }
@@ -244,7 +243,7 @@
   font-family: var(--plainify-font-family-sans) !important;
   font-size: var(--plainify-font-size-small) !important;
   font-style: normal !important;
-  font-weight: var(--plainify-font-weight-bold) !important;
+  font-weight: var(--plainify-font-weight-semibold) !important;
   line-height: var(--plainify-line-height-none) !important;
   letter-spacing: 0 !important;
   white-space: nowrap !important;
@@ -283,7 +282,7 @@
   background: #ffffff !important;
   box-shadow: 0 18px 48px rgba(20, 22, 18, 0.24) !important;
   font-family: var(--plainify-font-family-sans) !important;
-  font-size: var(--plainify-font-size-label) !important;
+  font-size: var(--plainify-font-size-body) !important;
   font-style: normal !important;
   font-weight: var(--plainify-font-weight-regular) !important;
   line-height: var(--plainify-line-height-body) !important;
@@ -303,8 +302,8 @@
   border-bottom: 1px solid #eceee9 !important;
   color: #767b73 !important;
   background: #fafbf8 !important;
-  font-size: var(--plainify-font-size-caption) !important;
-  font-weight: var(--plainify-font-weight-bold) !important;
+  font-size: var(--plainify-font-size-small) !important;
+  font-weight: var(--plainify-font-weight-medium) !important;
 }
 
 #baihuaben-preview header button {
@@ -319,7 +318,7 @@
   border-radius: 5px !important;
   color: #777c74 !important;
   background: transparent !important;
-  font-family: var(--plainify-font-family-latin) !important;
+  font-family: var(--plainify-font-family-sans) !important;
   font-size: var(--plainify-font-size-heading-medium) !important;
   font-weight: var(--plainify-font-weight-regular) !important;
   line-height: var(--plainify-line-height-none) !important;
@@ -337,7 +336,7 @@
   overflow-wrap: anywhere !important;
   color: #1d1f1b !important;
   font-size: var(--plainify-font-size-body-large) !important;
-  font-weight: var(--plainify-font-weight-bold) !important;
+  font-weight: var(--plainify-font-weight-semibold) !important;
   line-height: var(--plainify-line-height-tight) !important;
 }
 
@@ -347,8 +346,8 @@
   margin: 0 !important;
   padding: 9px 14px 0 !important;
   color: #454a42 !important;
-  font-size: var(--plainify-font-size-label) !important;
-  line-height: var(--plainify-line-height-relaxed) !important;
+  font-size: var(--plainify-font-size-body) !important;
+  line-height: var(--plainify-line-height-body) !important;
   overflow-wrap: anywhere !important;
 }
 
@@ -357,7 +356,7 @@
   margin: 0 0 3px !important;
   color: #8b9088 !important;
   font-size: var(--plainify-font-size-caption) !important;
-  font-weight: var(--plainify-font-weight-bold) !important;
+  font-weight: var(--plainify-font-weight-medium) !important;
   line-height: var(--plainify-line-height-snug) !important;
 }
 
@@ -408,7 +407,7 @@
   background: #ffffff !important;
   font-family: var(--plainify-font-family-sans) !important;
   font-size: var(--plainify-font-size-small) !important;
-  font-weight: var(--plainify-font-weight-bold) !important;
+  font-weight: var(--plainify-font-weight-semibold) !important;
   line-height: var(--plainify-line-height-none) !important;
   letter-spacing: 0 !important;
   white-space: nowrap !important;

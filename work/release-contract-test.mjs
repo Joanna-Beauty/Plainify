@@ -48,6 +48,45 @@ assert.doesNotMatch(extensionContent, /DeepSeek 正在生成/)
 const extensionPopup = read('extension/popup.js')
 assert.match(extensionPopup, /activeModelLabel.*正在生成/)
 assert.match(extensionPopup, /data\.model/)
+const extensionManifest = JSON.parse(read('extension/manifest.json'))
+const expectedExtensionIcons = {
+  16: 'icons/icon-16.png',
+  24: 'icons/icon-24.png',
+  32: 'icons/icon-32.png',
+  48: 'icons/icon-48.png',
+  128: 'icons/icon-128.png',
+}
+assert.deepEqual(extensionManifest.icons, expectedExtensionIcons)
+assert.deepEqual(extensionManifest.action.default_icon, {
+  16: expectedExtensionIcons[16],
+  24: expectedExtensionIcons[24],
+  32: expectedExtensionIcons[32],
+})
+for (const iconPath of Object.values(expectedExtensionIcons)) {
+  assert.ok(fs.existsSync(path.join(root, 'extension', iconPath)), `扩展缺少图标 ${iconPath}`)
+}
+assert.equal(read('extension/icons/plainify.svg'), read('public/favicon.svg'))
+assert.match(read('extension/popup.html'), /class="mark" src="icons\/plainify\.svg"/)
+const installedExtension = path.join(root, 'outputs', 'extension')
+if (fs.existsSync(installedExtension)) {
+  assert.equal(read('outputs/extension/manifest.json'), read('extension/manifest.json'))
+  assert.equal(read('outputs/extension/popup.html'), read('extension/popup.html'))
+  assert.equal(read('outputs/extension/popup.css'), read('extension/popup.css'))
+  for (const iconPath of Object.values(expectedExtensionIcons)) {
+    assert.deepEqual(
+      fs.readFileSync(path.join(installedExtension, iconPath)),
+      fs.readFileSync(path.join(root, 'extension', iconPath)),
+    )
+  }
+}
+if (fs.existsSync(extensionArchive)) {
+  const archivedManifest = JSON.parse(execFileSync('unzip', ['-p', extensionArchive, 'extension/manifest.json'], { encoding: 'utf8' }))
+  assert.deepEqual(archivedManifest, extensionManifest)
+  const archiveEntries = execFileSync('unzip', ['-Z1', extensionArchive], { encoding: 'utf8' })
+  for (const iconPath of Object.values(expectedExtensionIcons)) {
+    assert.match(archiveEntries, new RegExp(`^extension/${iconPath}$`, 'm'))
+  }
+}
 const settingsPage = read('src/pages/SettingsPage.jsx')
 assert.match(settingsPage, /https:\/\/my\.feishu\.cn\/share\/base\/form\/shrcnNIBOZIPMz8pMKyFIqZLtmb/)
 assert.equal(settingsPage.includes('wechat-around-9-qr'), false)
@@ -75,6 +114,18 @@ assert.deepEqual(
 )
 assert.match(settingsPage, /获取 API Key/)
 assert.match(settingsPage, /API Key 不会进入扩展/)
+const appHeader = read('src/components/AppHeader.jsx')
+const libraryPage = read('src/pages/LibraryPage.jsx')
+const appStyles = read('src/styles.css')
+assert.match(read('index.html'), /加简大白话 · Plainify｜用大白话，读懂复杂术语/)
+assert.match(appHeader, /加简大白话 · Plainify｜用大白话，读懂复杂术语/)
+assert.match(appHeader, /<span className="brand-title">加简大白话 · Plainify<\/span>/)
+assert.match(appHeader, /<span className="brand-tagline">用大白话，读懂复杂术语<\/span>/)
+assert.doesNotMatch(libraryPage, /你的个人术语库/)
+assert.doesNotMatch(appStyles, /\.library-title/)
+assert.match(appStyles, /\.brand-title \{[\s\S]*?font-size: var\(--font-size-heading-small\)/)
+assert.match(appStyles, /\.settings-dialog \{[\s\S]*?width: min\(1120px, calc\(100vw - 64px\)\)/)
+assert.match(appStyles, /\.settings-dialog \{[\s\S]*?height: min\(760px, calc\(100vh - 64px\)\)/)
 const app = read('src/App.jsx')
 assert.match(app, /去连接模型/)
 assert.match(app, /isModelSetupError/)
@@ -92,28 +143,61 @@ const typographyStyles = [
   ['扩展弹窗', read('extension/popup.css')],
   ['网页解释层', read('extension/content.css')],
 ]
-const expectedTypeScale = ['11', '12', '13', '14', '16', '18', '20', '24', '30', '40']
-const expectedWeights = ['400', '500', '600', '700']
+const expectedFontFamily = '"Noto Sans SC", "PingFang SC", "Microsoft YaHei", Arial, sans-serif'
+const expectedBrandFontFamily = '"Songti SC", "Noto Serif SC", Georgia, serif'
+const expectedTypeScale = ['12', '13', '14', '15', '16', '18', '20', '24', '30', '40']
+const expectedWeights = ['400', '500', '600']
 const expectedLineHeights = ['1', '1.3', '1.4', '1.6', '1.75']
 for (const [surface, styles] of typographyStyles) {
+  const fontFamily = styles
+    .match(/--(?:plainify-)?font-family-sans:\s*([^;]+);/)?.[1]
+    .replace(/\s*!important$/, '')
   const typeScale = [...styles.matchAll(/--(?:plainify-)?font-size-[\w-]+:\s*(\d+)px/g)]
     .map((match) => match[1])
   const weights = [...styles.matchAll(/--(?:plainify-)?font-weight-[\w-]+:\s*(\d+)/g)]
     .map((match) => match[1])
   const lineHeights = [...styles.matchAll(/--(?:plainify-)?line-height-[\w-]+:\s*([\d.]+)/g)]
     .map((match) => match[1])
+  assert.equal(fontFamily, expectedFontFamily, `${surface}应使用统一的中文无衬线字体栈`)
   assert.deepEqual(typeScale, expectedTypeScale, `${surface}应使用统一的 10 档字号`)
-  assert.deepEqual(weights, expectedWeights, `${surface}应使用统一的 4 档字重`)
+  assert.deepEqual(weights, expectedWeights, `${surface}应使用统一的 3 档字重`)
   assert.deepEqual(lineHeights, expectedLineHeights, `${surface}应使用统一的 5 档行高`)
+  assert.doesNotMatch(styles, /--(?:plainify-)?font-family-(?:serif|latin)/, `${surface}不应引入额外界面字体`)
+  assert.doesNotMatch(styles, /--(?:plainify-)?font-weight-bold/, `${surface}不应使用 700 字重`)
   assert.doesNotMatch(styles, /^\s*font-size:\s*\d/gm, `${surface}不应绕过字号 token`)
   assert.doesNotMatch(styles, /^\s*font-weight:\s*\d/gm, `${surface}不应绕过字重 token`)
   assert.doesNotMatch(styles, /^\s*line-height:\s*[\d.]+/gm, `${surface}不应绕过行高 token`)
   assert.doesNotMatch(styles, /^\s*font:\s*\d/gm, `${surface}不应通过 font 简写绕过排版 token`)
 }
+for (const [surface, styles] of typographyStyles.slice(0, 2)) {
+  const brandFontFamily = styles.match(/--font-family-brand:\s*([^;]+);/)?.[1]
+  assert.equal(brandFontFamily, expectedBrandFontFamily, `${surface}产品名应使用统一的品牌字体`)
+}
+const extensionContentStyles = typographyStyles[2][1]
+assert.match(
+  extensionContentStyles,
+  /#baihuaben-tooltip \{[\s\S]*?font-size: var\(--plainify-font-size-body\)/,
+  '网页悬停解释应使用正文级字号',
+)
+assert.match(
+  extensionContentStyles,
+  /#baihuaben-preview \{\n  position:[\s\S]*?font-size: var\(--plainify-font-size-body\)/,
+  '网页选词解释预览应使用正文级字号',
+)
+assert.match(appStyles, /\.term-explanation \{[\s\S]*?font-size: var\(--font-size-body\)/)
+assert.match(appStyles, /\.term-analogy \{[\s\S]*?font-size: var\(--font-size-body\)/)
+assert.match(appStyles, /h1,[\s\S]*?strong,[\s\S]*?font-weight: var\(--font-weight-semibold\)/)
+assert.match(appStyles, /\.app-identity \{[\s\S]*?font-family: var\(--font-family-brand\)/)
+assert.match(appStyles, /\.brand-title \{[\s\S]*?font-size: var\(--font-size-heading-small\)/)
+assert.match(appStyles, /\.brand-tagline \{[\s\S]*?font-size: var\(--font-size-heading-small\)/)
+assert.match(appStyles, /@media \(max-width: 350px\) \{[\s\S]*?\.social-compact-label \{[\s\S]*?display: none/)
+assert.match(read('extension/popup.css'), /body > header strong \{[\s\S]*?font-family: var\(--font-family-brand\)/)
 
 console.log('PASS 根目录文档覆盖安装、启动和扩展安装步骤')
 console.log('PASS macOS 一键安装从仓库位置解析路径并自动打开网站')
 console.log('PASS 配置模板仅含占位符，.env.local 被 Git 排除且不进入扩展包')
 console.log('PASS 扩展生成提示显示后端当前提供方与具体模型，不再硬编码 DeepSeek')
+console.log('PASS 扩展工具栏、管理页和弹窗标题使用与网站一致的 Logo')
 console.log('PASS 首次上手动作、扩展说明、设置自动同步和需求登记入口符合发布约定')
-console.log('PASS 主站与扩展共享统一的字号、字重和行高层级')
+console.log('PASS 首页品牌文案、简洁术语输入区和紧凑设置弹窗符合界面约定')
+console.log('PASS 主站、扩展弹窗与网页解释层共享统一的字体、字号、字重和行高层级')

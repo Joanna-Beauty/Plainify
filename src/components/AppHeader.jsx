@@ -31,12 +31,12 @@ export function SocialProfile({ compact = false }) {
 export default function AppHeader() {
   return (
     <header className="app-header">
-      <div className="app-identity" aria-label="加简大白话 · Plainify｜你的个人术语库">
+      <div className="app-identity" aria-label="加简大白话 · Plainify｜用大白话，读懂复杂术语">
         <img alt="" aria-hidden="true" className="brand-mark" src="/favicon.svg" />
         <span className="app-identity-copy">
-          <span className="brand-title">加简大白话 <small>· Plainify</small></span>
+          <span className="brand-title">加简大白话 · Plainify</span>
           <span aria-hidden="true" className="identity-divider" />
-          <span className="brand-tagline">你的个人术语库</span>
+          <span className="brand-tagline">用大白话，读懂复杂术语</span>
         </span>
       </div>
       <SocialProfile compact />
