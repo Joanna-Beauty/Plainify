@@ -8,14 +8,51 @@ const queryStatus = document.querySelector('#query-status')
 const resultStatus = document.querySelector('#result-status')
 const backendStatus = document.querySelector('#backend-status')
 const footer = document.querySelector('footer')
+const PROVIDER_NAMES = {
+  deepseek: 'DeepSeek',
+  openai: 'OpenAI',
+  qwen: '阿里云百炼',
+  moonshot: 'Moonshot AI',
+  zhipu: '智谱 AI',
+}
+const DEFAULT_MODELS = {
+  deepseek: 'deepseek-chat',
+  openai: 'gpt-4o-mini',
+  qwen: 'qwen-plus',
+  moonshot: 'kimi-k3',
+  zhipu: 'glm-5.3-flash',
+}
 let selectionContext = { source: '手动输入', sourceUrl: '' }
 let selectionText = ''
 let currentPreview = null
 let backendRetryTimer = null
+let activeModelLabel = '模型'
 
 function setStatus(element, message, type = '') {
   element.textContent = message
   element.className = `status${type ? ` ${type}` : ''}`
+}
+
+function modelLabel(settings = {}) {
+  const model = String(settings.model || '').trim()
+  const inferredProvider = /^(?:gpt-|chatgpt-|o\d(?:-|$))/i.test(model)
+    ? 'openai'
+    : /^qwen/i.test(model)
+      ? 'qwen'
+      : /^(?:kimi-|moonshot-)/i.test(model)
+        ? 'moonshot'
+        : /^glm-/i.test(model)
+          ? 'zhipu'
+          : 'deepseek'
+  const provider = Object.hasOwn(PROVIDER_NAMES, settings.provider) ? settings.provider : inferredProvider
+  const name = String(settings.providerName || PROVIDER_NAMES[provider] || settings.provider || '模型')
+  const selectedModel = model || DEFAULT_MODELS[provider]
+  return selectedModel ? `${name} · ${selectedModel}` : name
+}
+
+function updateRunningModelHint() {
+  if (!explainButton.disabled) return
+  setStatus(queryStatus, `${activeModelLabel} 正在生成大白话解释和生活化类比，请稍候。`)
 }
 
 async function loadSelection() {
@@ -42,17 +79,23 @@ async function checkBackend() {
     const response = await fetch('http://127.0.0.1:8787/api/health?probe=1')
     const data = await response.json()
     if (!response.ok || !data.ok) throw new Error()
+    activeModelLabel = modelLabel({
+      provider: data.providerId,
+      providerName: data.provider,
+      model: data.model,
+    })
+    updateRunningModelHint()
     if (data.ready) {
       footer.className = 'ready'
-      backendStatus.textContent = `本机 ${data.provider || '模型'} 服务已就绪`
-      return
+      backendStatus.textContent = `本机 ${activeModelLabel} 服务已就绪`
+      return data
     }
     if (data.providerStatus === 'insufficient_balance') {
       footer.className = 'recovering'
       backendStatus.textContent = '余额不足，充值到账后自动恢复'
     } else if (data.recoverable) {
       footer.className = 'recovering'
-      backendStatus.textContent = `${data.provider || '模型'} 暂不可用，正在自动重连`
+      backendStatus.textContent = `${activeModelLabel} 暂不可用，正在自动重连`
     } else {
       footer.className = 'error'
       backendStatus.textContent = data.configured ? data.statusMessage : '本机服务已启动，等待配置 Key'
@@ -61,9 +104,11 @@ async function checkBackend() {
       const delay = Math.max(2_000, Math.min(30_000, Number(data.retryAfterMs || 5_000)))
       backendRetryTimer = window.setTimeout(checkBackend, delay)
     }
+    return data
   } catch {
     footer.className = 'error'
     backendStatus.textContent = '本机服务未启动，请运行 npm run dev'
+    return null
   }
 }
 
@@ -102,8 +147,18 @@ explainButton.addEventListener('click', async () => {
   }
   explainButton.disabled = true
   explainButton.textContent = '正在生成…'
-  setStatus(queryStatus, 'DeepSeek 正在生成大白话解释和生活化类比，请稍候。')
+  setStatus(queryStatus, `${activeModelLabel} 正在生成大白话解释和生活化类比，请稍候。`)
   try {
+    const [{ settings }, health] = await Promise.all([
+      chrome.storage.local.get('settings'),
+      checkBackend(),
+    ])
+    activeModelLabel = health ? modelLabel({
+      provider: health.providerId,
+      providerName: health.provider,
+      model: health.model,
+    }) : modelLabel(settings)
+    updateRunningModelHint()
     const metadata = term === selectionText
       ? selectionContext
       : { source: '手动输入', sourceUrl: '' }
@@ -168,8 +223,15 @@ document.querySelector('#open-app').addEventListener('click', () => {
   chrome.tabs.create({ url: 'http://127.0.0.1:5173/' })
 })
 
-chrome.storage.local.get('popupPreview').then((stored) => {
+chrome.storage.local.get(['popupPreview', 'settings']).then((stored) => {
+  activeModelLabel = modelLabel(stored.settings)
   if (stored.popupPreview?.item?.term) renderPreview(stored.popupPreview)
   else showQueryView()
+})
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || !changes.settings) return
+  activeModelLabel = modelLabel(changes.settings.newValue)
+  updateRunningModelHint()
+  checkBackend()
 })
 checkBackend()

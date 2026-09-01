@@ -100,5 +100,5 @@ export const seedTerms = [
 export const defaultSettings = {
   model: 'deepseek-chat',
   autoExplain: true,
-  hoverExplanationMode: 'explanation',
+  hoverExplanationMode: 'both',
 }

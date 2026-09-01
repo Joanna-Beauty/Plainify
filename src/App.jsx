@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { archiveTermInList, archivedCategoryFor, isArchived, restoreTermInList } from './data/archive'
-import Sidebar, { Brand } from './components/Sidebar'
+import AppHeader from './components/AppHeader'
+import Sidebar from './components/Sidebar'
 import TermDrawer from './components/TermDrawer'
 import Toast from './components/Toast'
 import LibraryPage from './pages/LibraryPage'
@@ -21,6 +22,7 @@ import {
   renameGroup as renameGroupData,
 } from './data/grouping'
 import { normalizeProviderSettings } from './data/modelProviders'
+import { getOnboardingProgress, isModelSetupError } from './data/onboarding'
 import { reviewTermInList } from './data/review'
 import { defaultSettings, seedTerms } from './data/seedTerms'
 import { mergeExtensionTerms } from './data/termSync'
@@ -35,7 +37,7 @@ import {
   touchTerm,
 } from './data/terms'
 import { useLocalStorage } from './hooks/useLocalStorage'
-import { explainTerm, getLocalExplanation, organizeLocally, organizeWithAi } from './services/ai'
+import { explainTerm, getAiProviders, getLocalExplanation, organizeLocally, organizeWithAi } from './services/ai'
 
 const defaultGroups = groupNamesFromTerms(seedTerms)
 
@@ -50,19 +52,27 @@ export default function App() {
   const [busy, setBusy] = useState('')
   const [toast, setToast] = useState(null)
   const [extensionReady, setExtensionReady] = useState(false)
+  const [modelSetup, setModelSetup] = useState({ checked: false, configured: false })
   const [groupingPreview, setGroupingPreview] = useState(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useLocalStorage('baihuaben:sidebar-collapsed:v1', false)
+  const [onboardingCollapsed, setOnboardingCollapsed] = useLocalStorage('baihuaben:onboarding-collapsed:v1', false)
+  const [settingsTab, setSettingsTab] = useState('general')
   const settings = useMemo(() => normalizeProviderSettings(storedSettings), [storedSettings])
   const selectedTerm = useMemo(() => terms.find((term) => term.id === selectedId), [selectedId, terms])
   const activeTerms = useMemo(() => terms.filter((term) => !isArchived(term)), [terms])
+  const onboardingProgress = useMemo(() => getOnboardingProgress({
+    modelConfigured: modelSetup.configured,
+    extensionReady,
+    terms,
+  }), [extensionReady, modelSetup.configured, terms])
 
-  function showToast(message, type = 'info') {
-    setToast({ id: Date.now(), message, type })
+  function showToast(message, type = 'info', action = null) {
+    setToast({ id: Date.now(), message, type, action })
   }
 
   useEffect(() => {
     if (!toast) return undefined
-    const timer = window.setTimeout(() => setToast(null), 3600)
+    const timer = window.setTimeout(() => setToast(null), toast.action ? 8000 : 3600)
     return () => window.clearTimeout(timer)
   }, [toast])
 
@@ -74,6 +84,19 @@ export default function App() {
   useEffect(() => {
     setTerms((current) => normalizeTermList(current))
   }, [setTerms])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    getAiProviders(controller.signal)
+      .then((result) => setModelSetup({
+        checked: true,
+        configured: Boolean(result.providers?.some((provider) => provider.configured)),
+      }))
+      .catch((error) => {
+        if (error.name !== 'AbortError') setModelSetup({ checked: true, configured: false })
+      })
+    return () => controller.abort()
+  }, [])
 
   useEffect(() => {
     const discovered = groupNamesFromTerms(activeTerms)
@@ -106,13 +129,31 @@ export default function App() {
     window.postMessage({ source: 'baihuaben-web', type: 'SYNC_ALL', terms, settings }, '*')
   }, [extensionReady, settings, terms])
 
-  const reconcileProviderSelection = useCallback(({ provider, model }) => {
+  const reconcileProviderSelection = useCallback(({ provider, model, configured }) => {
     setSettings((current) => {
       const normalized = normalizeProviderSettings(current)
       const next = normalizeProviderSettings({ ...normalized, provider, model })
       return next.provider === normalized.provider && next.model === normalized.model ? current : next
     })
+    if (typeof configured === 'boolean') {
+      setModelSetup({ checked: true, configured })
+    }
   }, [setSettings])
+
+  function openSettings(tab = 'general') {
+    setSettingsTab(tab)
+    setPage('settings')
+  }
+
+  function navigateToPage(nextPage) {
+    if (nextPage === 'settings') setSettingsTab('general')
+    setPage(nextPage)
+  }
+
+  function showModelSetupToast(message) {
+    setModelSetup({ checked: true, configured: false })
+    showToast(message, 'info', { label: '去连接模型', onClick: () => openSettings('model') })
+  }
 
   async function addTerm(rawTerm, source = '手动输入', sourceUrl = '') {
     const term = normalizeTermText(rawTerm)
@@ -150,7 +191,11 @@ export default function App() {
         }, 'content') : entry))
         showToast('已经用大白话解释并收录。', 'success')
       } catch (error) {
-        showToast(`术语已保存，但解释生成失败：${error.message}`)
+        if (isModelSetupError(error)) {
+          showModelSetupToast('术语已保存，连接模型后即可补全大白话解释。')
+        } else {
+          showToast(`术语已保存，但解释生成失败：${error.message}`)
+        }
       }
     } else if (local) {
       showToast('已经解释并收录到术语库。', 'success')
@@ -173,7 +218,11 @@ export default function App() {
       }, 'content') : entry))
       showToast('解释已经补全。', 'success')
     } catch (error) {
-      showToast(error.message)
+      if (isModelSetupError(error)) {
+        showModelSetupToast('还没有可用的模型服务，连接后再生成解释。')
+      } else {
+        showToast(error.message)
+      }
     } finally {
       setBusy('')
     }
@@ -228,7 +277,7 @@ export default function App() {
     const removedMessage = groupingPreview.removedGroups.length
       ? `，已删除 ${groupingPreview.removedGroups.length} 个旧分组`
       : ''
-    showToast(`${groupingPreview.changes.length} 个术语已完成分组${removedMessage}，可以随时撤销。`, 'success')
+    showToast(`${groupingPreview.changes.length} 个术语已完成分组${removedMessage}。`, 'success')
   }
 
   function undoLastGrouping() {
@@ -376,24 +425,19 @@ export default function App() {
   function saveSettings(nextSettings) {
     const normalized = normalizeProviderSettings(nextSettings)
     setSettings(normalized)
-    showToast('设置已保存在当前浏览器。', 'success')
-  }
-
-  function syncExtension(config) {
-    window.postMessage({ source: 'baihuaben-web', type: 'SYNC_ALL', terms, settings: config }, '*')
-    showToast('术语和模型设置已同步到插件。', 'success')
+    showToast('通用设置已保存。', 'success')
   }
 
   return (
     <div className={sidebarCollapsed ? 'app-shell sidebar-collapsed' : 'app-shell'}>
+      <AppHeader />
       <Sidebar
         collapsed={sidebarCollapsed}
         extensionReady={extensionReady}
         onToggle={() => setSidebarCollapsed((current) => !current)}
         page={page}
-        setPage={setPage}
+        setPage={navigateToPage}
       />
-      <header className="mobile-header"><Brand /></header>
       {page === 'library' ? (
         <LibraryPage
           busy={busy}
@@ -410,11 +454,16 @@ export default function App() {
           onExplain={explainPending}
           onMergeGroups={mergeGroups}
           onOpen={setSelectedId}
+          onCollapseOnboarding={() => setOnboardingCollapsed(true)}
+          onExpandOnboarding={() => setOnboardingCollapsed(false)}
+          onOpenExtensionSetup={() => openSettings('general')}
+          onOpenModelSetup={() => openSettings('model')}
           onOrganize={organizeTerms}
           onRenameGroup={renameGroup}
           onStartReview={() => setPage('review')}
           onRestore={restoreTerm}
           onUndoGrouping={undoLastGrouping}
+          onboarding={modelSetup.checked ? { ...onboardingProgress, collapsed: onboardingCollapsed } : null}
           terms={terms}
         />
       ) : null}
@@ -422,10 +471,10 @@ export default function App() {
       {page === 'settings' ? (
         <ModelSettingsPage
           extensionReady={extensionReady}
+          initialTab={settingsTab}
           onClose={() => setPage('library')}
           onProviderResolved={reconcileProviderSelection}
           onSave={saveSettings}
-          onSyncExtension={syncExtension}
           settings={settings}
           showToast={showToast}
         />
@@ -436,7 +485,7 @@ export default function App() {
           ['review', '复习'],
           ['settings', '设置'],
         ].map(([id, label]) => (
-          <button className={page === id ? 'active' : ''} key={id} onClick={() => setPage(id)} type="button">{label}</button>
+          <button className={page === id ? 'active' : ''} key={id} onClick={() => navigateToPage(id)} type="button">{label}</button>
         ))}
       </nav>
       {selectedTerm ? (

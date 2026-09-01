@@ -9,10 +9,29 @@
   window.__baihuabenContentLoaded = true
 
   const APP_HOSTS = new Set(['127.0.0.1', 'localhost'])
+  const PROVIDER_NAMES = {
+    deepseek: 'DeepSeek',
+    openai: 'OpenAI',
+    qwen: '阿里云百炼',
+    moonshot: 'Moonshot AI',
+    zhipu: '智谱 AI',
+  }
+  const DEFAULT_MODELS = {
+    deepseek: 'deepseek-chat',
+    openai: 'gpt-4o-mini',
+    qwen: 'qwen-plus',
+    moonshot: 'kimi-k3',
+    zhipu: 'glm-5.3-flash',
+  }
   const isAppPage = APP_HOSTS.has(location.hostname) && Boolean(document.querySelector('meta[name="termly-app"][content="true"]'))
   const SKIP_TAGS = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEXTAREA', 'INPUT', 'SELECT', 'OPTION'])
   let terms = []
-  let settings = { hoverExplanationMode: 'explanation' }
+  let settings = {
+    provider: 'deepseek',
+    providerName: 'DeepSeek',
+    model: DEFAULT_MODELS.deepseek,
+    hoverExplanationMode: 'both',
+  }
   let scanTimer = null
   let tooltip = null
   let pinnedTooltip = null
@@ -44,10 +63,55 @@
   }
 
   function normalizeSettings(value = {}) {
+    const model = String(value.model || '').trim()
+    const inferredProvider = /^(?:gpt-|chatgpt-|o\d(?:-|$))/i.test(model)
+      ? 'openai'
+      : /^qwen/i.test(model)
+        ? 'qwen'
+        : /^(?:kimi-|moonshot-)/i.test(model)
+          ? 'moonshot'
+          : /^glm-/i.test(model)
+            ? 'zhipu'
+            : 'deepseek'
+    const provider = Object.hasOwn(PROVIDER_NAMES, value.provider) ? value.provider : inferredProvider
     return {
+      provider,
+      providerName: PROVIDER_NAMES[provider],
+      model: model || DEFAULT_MODELS[provider],
       hoverExplanationMode: ['explanation', 'analogy', 'both'].includes(value.hoverExplanationMode)
         ? value.hoverExplanationMode
-        : 'explanation',
+        : 'both',
+    }
+  }
+
+  function formatModelLabel(value = settings) {
+    const providerName = String(value.providerName || PROVIDER_NAMES[value.provider] || '模型')
+    const model = String(value.model || DEFAULT_MODELS[value.provider] || '').trim()
+    return model ? `${providerName} · ${model}` : providerName
+  }
+
+  function refreshDisplayedModelHints() {
+    const hint = tooltip?.querySelector('.baihuaben-model-hint')
+    if (hint) hint.textContent = `当前模型：${formatModelLabel()}`
+    if (previewStatus === 'loading') {
+      const status = previewCard?.querySelector('[data-field="status"]')
+      if (status) status.textContent = `${formatModelLabel()} 正在生成，通常需要几秒。`
+    }
+  }
+
+  async function refreshActiveModel() {
+    try {
+      const result = await chrome.runtime.sendMessage({ type: 'GET_ACTIVE_MODEL' })
+      if (!result?.ok || !result.modelInfo) return
+      settings = {
+        ...settings,
+        provider: result.modelInfo.provider || settings.provider,
+        providerName: result.modelInfo.providerName || settings.providerName,
+        model: result.modelInfo.model || settings.model,
+      }
+      refreshDisplayedModelHints()
+    } catch {
+      // The stored settings remain a usable fallback while the local service is unavailable.
     }
   }
 
@@ -202,6 +266,9 @@
       addSection('生活化类比', mark.dataset.baihuabenAnalogy, '这个术语暂时还没有生活化类比。')
     }
     content.append(...children)
+    const modelHint = document.createElement('small')
+    modelHint.className = 'baihuaben-model-hint'
+    modelHint.textContent = `当前模型：${formatModelLabel()}`
     if (pinned) {
       const header = document.createElement('header')
       const closeButton = document.createElement('button')
@@ -222,13 +289,13 @@
       archiveButton.title = '归档术语'
       archiveButton.textContent = '归档术语'
       footer.append(status, archiveButton)
-      element.replaceChildren(header, content, footer)
+      element.replaceChildren(header, content, modelHint, footer)
       pinnedTooltip = {
         id: mark.dataset.baihuabenId || '',
         term: mark.dataset.baihuabenTerm || '',
       }
     } else {
-      element.replaceChildren(title, content)
+      element.replaceChildren(title, content, modelHint)
     }
     element.dataset.pinned = String(pinned)
     element.setAttribute('role', pinned ? 'dialog' : 'tooltip')
@@ -341,7 +408,7 @@
     return previewCard
   }
 
-  function showPreview(item, status, rect, error = '') {
+  function showPreview(item, status, rect, error = '', modelInfo = settings) {
     const card = ensurePreviewCard()
     const isLoading = status === 'loading'
     const hasError = status === 'error' || Boolean(error)
@@ -358,7 +425,9 @@
       ? '正在生成生活化类比…'
       : item.analogy || (hasError ? '这次没有生成成功。' : '暂时没有生活化类比。')
     const statusLine = card.querySelector('[data-field="status"]')
-    statusLine.textContent = isLoading ? 'DeepSeek 正在生成，通常需要几秒。' : error
+    statusLine.textContent = isLoading
+      ? `${formatModelLabel(modelInfo)} 正在生成，通常需要几秒。`
+      : error || (status === 'exists' ? '这个术语已在术语库。' : `由 ${formatModelLabel(modelInfo)} 生成。`)
     const dismissButton = card.querySelector('[data-action="dismiss"]')
     const saveButton = card.querySelector('[data-action="save"]')
     dismissButton.textContent = status === 'exists' || isLoading ? '关闭' : '先不添加'
@@ -393,15 +462,22 @@
       showPreview({ term, explanation: '', analogy: '' }, 'loading', rect)
       hideSelectionButton()
       try {
-        const result = await chrome.runtime.sendMessage({
+        const modelInfoPromise = chrome.runtime.sendMessage({ type: 'GET_ACTIVE_MODEL' })
+        const explanationPromise = chrome.runtime.sendMessage({
           type: 'EXPLAIN_TERM',
           term,
           source: document.title || location.hostname,
           sourceUrl: location.href,
         })
+        const modelResult = await modelInfoPromise.catch(() => null)
+        if (requestId !== previewRequestId) return
+        if (modelResult?.ok && modelResult.modelInfo) {
+          showPreview({ term, explanation: '', analogy: '' }, 'loading', rect, '', modelResult.modelInfo)
+        }
+        const result = await explanationPromise
         if (requestId !== previewRequestId) return
         if (!result?.ok) throw new Error(result?.error || '解释失败')
-        showPreview(result.term, result.status, rect)
+        showPreview(result.term, result.status, rect, '', result.modelInfo || settings)
       } catch (error) {
         if (requestId !== previewRequestId) return
         showPreview({ term, explanation: '' }, 'error', rect, error.message)
@@ -515,6 +591,7 @@
   chrome.storage.local.get(['terms', 'settings']).then((stored) => {
     settings = normalizeSettings(stored.settings)
     refresh(stored.terms)
+    if (!isAppPage) refreshActiveModel()
     if (isAppPage) {
       window.postMessage({
         source: 'baihuaben-extension',
@@ -527,6 +604,7 @@
     if (area !== 'local') return
     if (changes.settings) {
       settings = normalizeSettings(changes.settings.newValue)
+      refreshDisplayedModelHints()
       hideTooltip()
     }
     if (!changes.terms) return

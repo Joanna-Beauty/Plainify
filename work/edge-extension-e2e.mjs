@@ -114,7 +114,20 @@ async function capture(client, filename) {
 
 const version = await waitFor(() => getJson('/json/version'), 'Edge DevTools endpoint')
 const backendModelData = await (await fetch('http://127.0.0.1:8787/api/models')).json()
+const backendHealthData = await (await fetch('http://127.0.0.1:8787/api/health')).json()
+const backendProviderData = await (await fetch('http://127.0.0.1:8787/api/ai/providers', {
+  headers: { Origin: 'http://127.0.0.1:5173' },
+})).json()
 const expectedModels = Array.isArray(backendModelData.models) ? backendModelData.models : []
+const expectedProviderName = String(backendHealthData.provider || '模型')
+const expectedProviderId = String(backendHealthData.providerId || 'deepseek')
+const expectedModel = String(backendHealthData.model || '')
+const expectedModelLabel = expectedModel ? `${expectedProviderName} · ${expectedModel}` : expectedProviderName
+const expectedConfiguredProviderIds = (backendProviderData.providers || [])
+  .filter((provider) => provider.configured)
+  .map((provider) => provider.id)
+const expectedActiveProvider = (backendProviderData.providers || [])
+  .find((provider) => provider.id === expectedProviderId) || {}
 const browser = await new CdpClient(version.webSocketDebuggerUrl).connect()
 const clients = [browser]
 
@@ -224,7 +237,8 @@ try {
   const loadingPreview = await waitFor(
     () => evaluate(reader, `(() => {
       const card = document.querySelector('#baihuaben-preview')
-      return card?.dataset.state === 'loading' ? {
+      return card?.dataset.state === 'loading'
+        && card.innerText.includes(${JSON.stringify(expectedModelLabel)}) ? {
         busy: card?.getAttribute('aria-busy'),
         state: card?.dataset.state,
         text: card?.innerText || '',
@@ -237,6 +251,7 @@ try {
   assert.equal(loadingPreview.state, 'loading')
   assert.match(loadingPreview.text, /正在生成大白话解释/)
   assert.match(loadingPreview.text, /正在生成生活化类比/)
+  assert.ok(loadingPreview.text.includes(`${expectedModelLabel} 正在生成`))
   assert.equal(loadingPreview.saveDisabled, true)
   console.log('STEP loading feedback rendered immediately')
 
@@ -265,6 +280,7 @@ try {
   assert.match(dismissedPreview.text, /术语解释/)
   assert.ok(dismissedPreview.analogy.length >= 8)
   assert.ok(dismissedPreview.explanation.length >= 8)
+  assert.ok(dismissedPreview.text.includes(`由 ${expectedModelLabel} 生成`))
   assert.equal(dismissedPreview.text.includes('专业解释'), false)
   assert.equal(dismissedPreview.text.includes('通俗解释'), false)
   assert.equal(dismissedPreview.insideViewport, true)
@@ -387,6 +403,7 @@ try {
   assert.equal(pinnedTooltip.closeLabel, '关闭解释栏')
   assert.equal(pinnedTooltip.archiveText, '归档术语')
   assert.ok(pinnedTooltip.text.includes(savedPreview.explanation))
+  assert.ok(pinnedTooltip.text.includes(`当前模型：${expectedModelLabel}`))
   await new Promise((resolve) => setTimeout(resolve, 800))
   assert.equal(
     await evaluate(reader, `document.querySelector('#baihuaben-tooltip')?.style.display`),
@@ -449,7 +466,9 @@ try {
     '高亮悬停解释',
   )
   assert.ok(tooltip.includes(savedPreview.explanation))
-  assert.equal(tooltip.includes('生活化类比'), false)
+  assert.ok(tooltip.includes(savedPreview.analogy))
+  assert.ok(tooltip.includes(`当前模型：${expectedModelLabel}`))
+  assert.ok(tooltip.includes('生活化类比'))
   assert.equal(await evaluate(reader, `document.querySelectorAll('#baihuaben-tooltip').length`), 1)
   await evaluate(reader, `(() => {
     const marks = [...document.querySelectorAll('.baihuaben-highlight')]
@@ -638,6 +657,23 @@ try {
     Array.from(document.querySelectorAll('.organize-menu button'))
       .find((button) => button.textContent.includes('重新整理全部术语')).click()
   })()`)
+  const regroupConfirmation = await waitFor(
+    () => evaluate(app, `(() => {
+      const dialog = document.querySelector('[role="dialog"][aria-labelledby="regroup-confirmation-title"]')
+      if (!dialog) return null
+      return {
+        text: dialog.innerText,
+        hasPreview: Boolean(document.querySelector('[role="dialog"][aria-labelledby="grouping-preview-title"]')),
+      }
+    })()`),
+    '全量重分组风险确认',
+  )
+  assert.match(regroupConfirmation.text, /重新整理术语库中的全部术语/)
+  assert.match(regroupConfirmation.text, /可能改变现有分组/)
+  assert.match(regroupConfirmation.text, /只有应用后才会修改术语库/)
+  assert.equal(regroupConfirmation.hasPreview, false)
+  await evaluate(app, `[...document.querySelectorAll('[role="dialog"] button')]
+    .find((button) => button.textContent.includes('继续整理')).click()`)
   const fullGroupingPreview = await waitFor(
     () => evaluate(app, `(() => {
       const dialog = document.querySelector('[role="dialog"][aria-labelledby="grouping-preview-title"]')
@@ -728,63 +764,53 @@ try {
     () => evaluate(app, `Boolean(document.querySelector('[data-settings-tab="model"] .provider-summary'))`),
     '已配置提供方卡片',
   )
-  await evaluate(app, `document.querySelector('[data-settings-tab="model"] .provider-summary button').click()`)
+  await evaluate(app, `document.querySelector('[data-settings-tab="model"] .provider-summary.active .provider-edit-button').click()`)
   await waitFor(
     () => evaluate(app, `Boolean(document.querySelector('.provider-editor[data-editor-mode="edit"]'))`),
     '已配置提供方编辑器',
   )
-  await evaluate(app, `document.querySelector('.provider-editor .custom-settings-toggle').click()`)
   const modelSettings = await waitFor(
     () => evaluate(app, `(() => {
       const editor = document.querySelector('.provider-editor[data-editor-mode="edit"]')
       if (!document.querySelector('[data-settings-tab="model"]') || !editor) return null
-      const urlInput = document.querySelector('.adapter-url-field input')
       return {
         configuredProviders: [...document.querySelectorAll('.provider-summary')]
           .map((item) => item.dataset.providerId),
         adapter: document.querySelector('.provider-editor-title span')?.textContent.trim(),
-        models: [...document.querySelectorAll('.model-catalog-row')].map((item) => item.dataset.modelId),
-        hasKeyInput: Boolean(document.querySelector('input[name="deepseekApiKey"]')),
-        apiUrl: urlInput?.value,
-        apiUrlReadOnly: urlInput?.readOnly,
+        models: [...document.querySelectorAll('.verified-model-field option')].map((item) => item.value),
+        hasKeyInput: Boolean(document.querySelector('input[name="${expectedProviderId}ApiKey"]')),
+        apiUrl: document.querySelector('.official-endpoint-preview span')?.textContent.trim()
+          || document.querySelector('input[aria-label="自定义 API 地址"]')?.value,
+        hasCustomAddressMode: [...document.querySelectorAll('.endpoint-mode-control button')]
+          .some((button) => button.textContent.trim() === '自定义地址'),
         hasCustomProviderButton: document.body.innerText.includes('添加自定义提供方'),
       }
     })()`),
     '模型设置页',
   )
-  assert.deepEqual(modelSettings.configuredProviders, ['deepseek'])
-  assert.equal(modelSettings.adapter, 'deepseek-official')
-  assert.equal(modelSettings.models.includes('deepseek-chat'), false)
+  assert.deepEqual(modelSettings.configuredProviders, expectedConfiguredProviderIds)
+  assert.ok(modelSettings.adapter)
+  assert.equal(modelSettings.models.includes(expectedModel), true)
   assert.equal(modelSettings.hasKeyInput, true)
-  assert.equal(modelSettings.apiUrl, 'https://api.deepseek.com/v1')
-  assert.equal(modelSettings.apiUrlReadOnly, true)
+  assert.equal(modelSettings.apiUrl, expectedActiveProvider.baseUrl)
+  assert.equal(modelSettings.hasCustomAddressMode, true)
   assert.equal(modelSettings.hasCustomProviderButton, false)
 
   await evaluate(app, `[...document.querySelectorAll('button')]
-    .find((button) => button.textContent.trim() === '获取可用模型').click()`)
+    .find((button) => button.textContent.trim() === '重新测试').click()`)
   const availableModels = await waitFor(
     () => evaluate(app, `(() => {
-      const dialog = document.querySelector('.model-discovery-dialog')
-      if (!dialog) return null
-      return [...dialog.querySelectorAll('.model-discovery-list label span')].map((item) => item.textContent.trim())
+      const verification = document.querySelector('.model-verification[data-status="success"]')
+      const options = [...document.querySelectorAll('.verified-model-field option')]
+      if (!verification || !options.length) return null
+      return options.map((item) => item.value)
     })()`),
-    '可用模型选择弹窗',
+    '联通成功后的模型菜单',
   )
-  const initialModels = new Set(modelSettings.models)
   assert.deepEqual(
     [...availableModels].sort(),
-    expectedModels.filter((model) => model !== 'deepseek-chat' && !initialModels.has(model)).sort(),
+    [...expectedModels].sort(),
   )
-  if (availableModels.length) {
-    await evaluate(app, `document.querySelector('.model-discovery-dialog .primary-button').click()`)
-    const expectedCatalogSize = new Set([...initialModels, ...availableModels]).size
-    await waitFor(
-      () => evaluate(app, `[...document.querySelectorAll('.model-catalog-row')].length === ${expectedCatalogSize}`),
-      '所选模型加入目录',
-    )
-  } else {
-    await evaluate(app, `document.querySelector('button[aria-label="关闭模型选择"]').click()`)
-  }
 
   await evaluate(app, `[...document.querySelectorAll('.settings-tabs button')]
     .find((button) => button.textContent.trim() === '通用设置').click()`)
@@ -792,23 +818,20 @@ try {
     () => evaluate(app, `(() => {
       if (!document.querySelector('[data-settings-tab="general"]')) return null
       return {
-        hoverLabels: [...document.querySelectorAll('.segmented-control button')].map((button) => button.textContent.trim()),
-        activeHoverLabel: document.querySelector('.segmented-control button[aria-pressed="true"]')?.textContent.trim() || '',
+        hoverLabels: [...document.querySelectorAll('.hover-mode-option strong')].map((label) => label.textContent.trim()),
+        activeHoverLabel: document.querySelector('.hover-mode-option input:checked')
+          ?.closest('.hover-mode-option')?.querySelector('strong')?.textContent.trim() || '',
       }
     })()`),
     '通用设置页',
   )
-  assert.deepEqual(generalSettings.hoverLabels, ['大白话解释', '生活化类比', '全部展示'])
-  assert.equal(generalSettings.activeHoverLabel, '大白话解释')
+  assert.deepEqual(generalSettings.hoverLabels, ['解释和类比', '大白话解释', '生活化类比'])
+  assert.equal(generalSettings.activeHoverLabel, '解释和类比')
   console.log('STEP settings page loaded')
 
-  await evaluate(app, `(() => {
-    [...document.querySelectorAll('.segmented-control button')]
-      .find((button) => button.textContent.trim() === '生活化类比').click()
-  })()`)
+  await evaluate(app, `document.querySelector('input[name="hoverExplanationMode"][value="analogy"]').click()`)
   await waitFor(
-    () => evaluate(app, `document.querySelector('.segmented-control button[aria-pressed="true"]')
-      ?.textContent.trim() === '生活化类比'`),
+    () => evaluate(app, `document.querySelector('input[name="hoverExplanationMode"][value="analogy"]')?.checked`),
     '生活化类比选项选中',
   )
   await evaluate(app, `document.querySelector('.general-settings-form button[type="submit"]').click()`)
@@ -831,14 +854,10 @@ try {
   assert.ok(analogyTooltip.includes(savedPreview.analogy))
   assert.equal(analogyTooltip.includes('大白话解释'), false)
 
-  await evaluate(app, `(() => {
-    [...document.querySelectorAll('.segmented-control button')]
-      .find((button) => button.textContent.trim() === '全部展示').click()
-  })()`)
+  await evaluate(app, `document.querySelector('input[name="hoverExplanationMode"][value="both"]').click()`)
   await waitFor(
-    () => evaluate(app, `document.querySelector('.segmented-control button[aria-pressed="true"]')
-      ?.textContent.trim() === '全部展示'`),
-    '全部展示选项选中',
+    () => evaluate(app, `document.querySelector('input[name="hoverExplanationMode"][value="both"]')?.checked`),
+    '解释和类比选项选中',
   )
   await evaluate(app, `document.querySelector('.general-settings-form button[type="submit"]').click()`)
   await waitFor(
@@ -928,6 +947,7 @@ try {
     '扩展弹窗后端状态',
   )
   assert.match(popupBackend, /已就绪/)
+  assert.ok(popupBackend.includes(expectedModelLabel))
   console.log('STEP popup query view ready')
 
   const popupLoading = await evaluate(popup, `(() => {
@@ -941,7 +961,7 @@ try {
     }
   })()`)
   assert.equal(popupLoading.buttonText, '正在生成…')
-  assert.match(popupLoading.status, /DeepSeek 正在生成大白话解释和生活化类比/)
+  assert.ok(popupLoading.status.includes(`${expectedModelLabel} 正在生成大白话解释和生活化类比`))
   await waitFor(
     () => evaluate(popup, `chrome.storage.local.get(['terms', 'popupPreview']).then(({ terms, popupPreview }) =>
       popupPreview?.item?.term === 'PopupSmokeTerm'

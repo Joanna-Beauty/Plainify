@@ -1,7 +1,29 @@
 const MENU_ID = 'baihuaben-save-term'
 const BACKEND_EXPLAIN_URL = 'http://127.0.0.1:8787/api/explain'
-const DEFAULT_MODELS = { deepseek: 'deepseek-chat', openai: 'gpt-4o-mini' }
+const BACKEND_HEALTH_URL = 'http://127.0.0.1:8787/api/health'
+const DEFAULT_MODELS = {
+  deepseek: 'deepseek-chat',
+  openai: 'gpt-4o-mini',
+  qwen: 'qwen-plus',
+  moonshot: 'kimi-k3',
+  zhipu: 'glm-5.3-flash',
+}
+const PROVIDER_NAMES = {
+  deepseek: 'DeepSeek',
+  openai: 'OpenAI',
+  qwen: '阿里云百炼',
+  moonshot: 'Moonshot AI',
+  zhipu: '智谱 AI',
+}
 let storageQueue = Promise.resolve()
+
+function inferProvider(model) {
+  if (/^(?:gpt-|chatgpt-|o\d(?:-|$))/i.test(model)) return 'openai'
+  if (/^qwen/i.test(model)) return 'qwen'
+  if (/^(?:kimi-|moonshot-)/i.test(model)) return 'moonshot'
+  if (/^glm-/i.test(model)) return 'zhipu'
+  return 'deepseek'
+}
 
 class BackendRequestError extends Error {
   constructor(message, code = 'request_failed', options = {}) {
@@ -19,11 +41,13 @@ function withStorageLock(operation) {
 }
 
 function normalizeSettings(settings = {}) {
-  const provider = ['deepseek', 'openai'].includes(settings.provider) ? settings.provider : 'deepseek'
   const storedModel = String(settings.model || '').trim()
+  const provider = Object.hasOwn(DEFAULT_MODELS, settings.provider)
+    ? settings.provider
+    : inferProvider(storedModel)
   const hoverExplanationMode = ['explanation', 'analogy', 'both'].includes(settings.hoverExplanationMode)
     ? settings.hoverExplanationMode
-    : 'explanation'
+    : 'both'
   return {
     provider,
     model: storedModel || DEFAULT_MODELS[provider],
@@ -130,6 +154,8 @@ function scopeSource(primary, fallback, scope) {
 }
 
 function mergeTermRecords(primaryRecord, fallbackRecord) {
+  if (!fallbackRecord) return normalizeTermRecord(primaryRecord, { now: primaryRecord?.createdAt })
+  if (!primaryRecord) return normalizeTermRecord(fallbackRecord, { now: fallbackRecord?.createdAt })
   const primary = normalizeTermRecord(primaryRecord, { now: primaryRecord?.createdAt })
   const fallback = normalizeTermRecord(fallbackRecord, { now: fallbackRecord?.createdAt })
   const content = scopeSource(primary, fallback, 'content')
@@ -184,7 +210,7 @@ function buildTerm(term, metadata = {}, generated = {}) {
   }, { now })
 }
 
-function mergeTermFields(primary, fallback = {}) {
+function mergeTermFields(primary, fallback) {
   return mergeTermRecords(primary, fallback)
 }
 
@@ -213,6 +239,7 @@ function mergeSyncedTerms(incomingTerms, storedTerms) {
 }
 
 async function requestExplanation(term, settings) {
+  const requested = normalizeSettings(settings)
   let response
   try {
     response = await fetch(BACKEND_EXPLAIN_URL, {
@@ -220,8 +247,8 @@ async function requestExplanation(term, settings) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         term,
-        provider: normalizeSettings(settings).provider,
-        model: normalizeSettings(settings).model,
+        provider: requested.provider,
+        model: requested.model,
       }),
     })
   } catch {
@@ -241,6 +268,23 @@ async function requestExplanation(term, settings) {
     explanation: String(data.explanation),
     analogy: String(data.analogy || ''),
     category: String(data.category || '未分组'),
+    modelInfo: {
+      provider: String(data.providerId || requested.provider),
+      providerName: String(data.provider || PROVIDER_NAMES[requested.provider] || '模型'),
+      model: String(data.model || requested.model),
+    },
+  }
+}
+
+async function getActiveModelInfo() {
+  const response = await fetch(BACKEND_HEALTH_URL)
+  let data = {}
+  try { data = await response.json() } catch { data = {} }
+  if (!response.ok || data.ok === false) throw new Error('无法读取当前模型配置')
+  return {
+    provider: String(data.providerId || ''),
+    providerName: String(data.provider || '模型'),
+    model: String(data.model || ''),
   }
 }
 
@@ -253,9 +297,9 @@ async function previewTerm(rawTerm, metadata = {}) {
     return { status: 'exists', term: duplicate }
   }
 
-  const generated = await requestExplanation(term, stored.settings || {})
+  const { modelInfo, ...generated } = await requestExplanation(term, stored.settings || {})
   const preview = buildTerm(term, metadata, { ...duplicate, ...generated })
-  if (!duplicate) return { status: 'preview', term: preview }
+  if (!duplicate) return { status: 'preview', term: preview, modelInfo }
 
   await withStorageLock(async () => {
     const latest = await chrome.storage.local.get('terms')
@@ -266,7 +310,7 @@ async function previewTerm(rawTerm, metadata = {}) {
         : item),
     })
   })
-  return { status: 'exists', term: touchTerm(duplicate, generated, 'content') }
+  return { status: 'exists', term: touchTerm(duplicate, generated, 'content'), modelInfo }
 }
 
 async function savePreparedTerm(rawItem, metadata = {}) {
@@ -387,6 +431,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     operation = addTerm(message.term, { source: message.source, sourceUrl: message.sourceUrl })
   } else if (message?.type === 'ARCHIVE_TERM') {
     operation = archiveTerm(message.id, message.term)
+  } else if (message?.type === 'GET_ACTIVE_MODEL') {
+    operation = getActiveModelInfo().then((modelInfo) => ({ modelInfo }))
   } else if (message?.type === 'SYNC_TERMS' && Array.isArray(message.terms)) {
     operation = syncFromApp(message.terms)
   } else if (message?.type === 'SYNC_ALL' && Array.isArray(message.terms)) {

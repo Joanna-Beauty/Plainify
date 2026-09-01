@@ -1,5 +1,6 @@
-import { useDeferredValue, useMemo, useState } from 'react'
+import { useDeferredValue, useMemo, useRef, useState } from 'react'
 import { Archive, ArrowRight, BookOpenCheck, FolderCog, MoreHorizontal, RefreshCw, Search, Sparkles, Undo2 } from 'lucide-react'
+import FirstRunGuide from '../components/FirstRunGuide'
 import GroupManager from '../components/GroupManager'
 import GroupingPreview from '../components/GroupingPreview'
 import TermCard from '../components/TermCard'
@@ -18,7 +19,11 @@ export default function LibraryPage({
   onCreateGroup,
   onDelete,
   onDeleteGroup,
+  onCollapseOnboarding,
+  onExpandOnboarding,
   onOpen,
+  onOpenExtensionSetup,
+  onOpenModelSetup,
   onRestore,
   onExplain,
   onMergeGroups,
@@ -26,12 +31,15 @@ export default function LibraryPage({
   onRenameGroup,
   onStartReview,
   onUndoGrouping,
+  onboarding,
 }) {
+  const captureInputRef = useRef(null)
   const [newTerm, setNewTerm] = useState('')
   const [query, setQuery] = useState('')
   const [activeCategory, setActiveCategory] = useState('全部术语')
   const [view, setView] = useState('library')
   const [showGroupManager, setShowGroupManager] = useState(false)
+  const [showRegroupConfirmation, setShowRegroupConfirmation] = useState(false)
   const deferredQuery = useDeferredValue(query.trim().toLowerCase())
   const activeTerms = useMemo(() => terms.filter((term) => !isArchived(term)), [terms])
   const archivedTerms = useMemo(() => terms.filter(isArchived), [terms])
@@ -86,8 +94,13 @@ export default function LibraryPage({
     if (added) setNewTerm('')
   }
 
-  function regroupAll(event) {
+  function requestRegroupAll(event) {
     event.currentTarget.closest('details')?.removeAttribute('open')
+    setShowRegroupConfirmation(true)
+  }
+
+  function confirmRegroupAll() {
+    setShowRegroupConfirmation(false)
     onOrganize('all')
   }
 
@@ -98,25 +111,26 @@ export default function LibraryPage({
 
   return (
     <main className="page library-page">
-      <header className="page-heading">
-        <div>
-          <h1>{isArchiveView ? '归档' : '你的个人术语库'}</h1>
-          {isArchiveView ? <p>已经熟悉的术语收在这里，需要时可以恢复。</p> : null}
-        </div>
-        <a
-          aria-label="打开加简大白话的 B 站主页"
-          className="profile-avatar"
-          href="https://space.bilibili.com/1469658337?spm_id_from=333.1007.0.0"
-          rel="noreferrer"
-          target="_blank"
-          title="加简大白话的 B 站主页"
-        >
-          <img alt="" src="/plainify-avatar.png" />
-        </a>
-      </header>
+      {isArchiveView ? (
+        <header className="page-heading">
+          <div>
+            <h1>归档</h1>
+            <p>已经熟悉的术语收在这里，需要时可以恢复。</p>
+          </div>
+        </header>
+      ) : <h1 className="sr-only">你的个人术语库</h1>}
 
       {!isArchiveView ? (
         <>
+          <FirstRunGuide
+            collapsed={onboarding?.collapsed}
+            onCollapse={onCollapseOnboarding}
+            onExpand={onExpandOnboarding}
+            onFocusCapture={() => captureInputRef.current?.focus()}
+            onOpenExtension={onOpenExtensionSetup}
+            onOpenModel={onOpenModelSetup}
+            progress={onboarding}
+          />
           <form className="capture-bar" onSubmit={submit}>
             <label className="sr-only" htmlFor="new-term">要解释的术语</label>
             <input
@@ -124,6 +138,7 @@ export default function LibraryPage({
               id="new-term"
               onChange={(event) => setNewTerm(event.target.value)}
               placeholder="粘贴一个刚遇到的术语，比如：RAG"
+              ref={captureInputRef}
               value={newTerm}
             />
             <button disabled={busy === 'adding' || !newTerm.trim()} type="submit">
@@ -177,10 +192,9 @@ export default function LibraryPage({
                       <MoreHorizontal aria-hidden="true" size={17} />
                     </summary>
                     <div>
-                      <button disabled={busy === 'organizing' || !activeTerms.length} onClick={regroupAll} type="button">
+                      <button disabled={busy === 'organizing' || !activeTerms.length} onClick={requestRegroupAll} type="button">
                         重新整理全部术语
                       </button>
-                      <small>可能改变现有分组</small>
                     </div>
                   </details>
                 </div>
@@ -199,6 +213,7 @@ export default function LibraryPage({
                   <div className="term-list">
                     {section.terms.map((term) => (
                       <TermCard
+                        busy={busy}
                         key={term.id}
                         onDelete={onDelete}
                         onExplain={onExplain}
@@ -221,6 +236,7 @@ export default function LibraryPage({
             <div className="term-list">
               {visibleTerms.length ? visibleTerms.map((term) => (
                 <TermCard
+                  busy={busy}
                   key={term.id}
                   onArchive={onArchive}
                   onExplain={onExplain}
@@ -300,6 +316,30 @@ export default function LibraryPage({
       ) : null}
       {groupingPreview ? (
         <GroupingPreview onApply={onApplyGrouping} onClose={onCancelGrouping} preview={groupingPreview} />
+      ) : null}
+      {showRegroupConfirmation ? (
+        <div className="confirm-backdrop" onMouseDown={() => setShowRegroupConfirmation(false)} role="presentation">
+          <section
+            aria-describedby="regroup-confirmation-description"
+            aria-labelledby="regroup-confirmation-title"
+            aria-modal="true"
+            className="confirm-dialog"
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') setShowRegroupConfirmation(false)
+            }}
+            onMouseDown={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <h2 id="regroup-confirmation-title">重新整理全部术语？</h2>
+            <p id="regroup-confirmation-description">
+              这会重新整理术语库中的全部术语，可能改变现有分组。整理完成后仍会先展示方案，只有应用后才会修改术语库。
+            </p>
+            <div className="confirm-actions">
+              <button autoFocus className="secondary-button" onClick={() => setShowRegroupConfirmation(false)} type="button">取消</button>
+              <button className="primary-button" onClick={confirmRegroupAll} type="button">继续整理</button>
+            </div>
+          </section>
+        </div>
       ) : null}
     </main>
   )

@@ -1,4 +1,5 @@
 import { BookOpen, PanelLeftClose, PanelLeftOpen, RefreshCw, Settings } from 'lucide-react'
+import { SocialProfile } from './AppHeader'
 
 const navItems = [
   { id: 'library', label: '术语库', icon: BookOpen },
@@ -6,22 +7,10 @@ const navItems = [
   { id: 'settings', label: '设置', icon: Settings },
 ]
 
-export function Brand() {
-  return (
-    <div className="brand" aria-label="加简大白话 · Plainify">
-      <img alt="" aria-hidden="true" className="brand-mark" src="/favicon.svg" />
-      <span className="brand-copy">
-        <span className="brand-title">加简大白话 <small>· Plainify</small></span>
-      </span>
-    </div>
-  )
-}
-
 export default function Sidebar({ collapsed, extensionReady, onToggle, page, setPage }) {
   return (
     <aside className={collapsed ? 'sidebar is-collapsed' : 'sidebar'}>
       <div className="sidebar-header">
-        <Brand />
         <button
           aria-expanded={!collapsed}
           aria-label={collapsed ? '展开左侧边栏' : '收起左侧边栏'}
@@ -50,12 +39,15 @@ export default function Sidebar({ collapsed, extensionReady, onToggle, page, set
           </button>
         ))}
       </nav>
-      <div className="extension-state" title={collapsed ? (extensionReady ? '插件已连接' : '插件未连接') : undefined}>
-        <div className={extensionReady ? 'status-line connected' : 'status-line'}>
-          <span className="status-dot" aria-hidden="true" />
-          <span>{extensionReady ? '插件已连接' : '插件未连接'}</span>
+      <div className="sidebar-footer">
+        <SocialProfile />
+        <div className="extension-state" title={collapsed ? (extensionReady ? '插件已连接' : '插件未连接') : undefined}>
+          <div className={extensionReady ? 'status-line connected' : 'status-line'}>
+            <span className="status-dot" aria-hidden="true" />
+            <span>{extensionReady ? '插件已连接' : '插件未连接'}</span>
+          </div>
+          <p>{extensionReady ? '网页上选中的陌生词会自动回到这里。' : '安装插件后，可在任意网页直接收词。'}</p>
         </div>
-        <p>{extensionReady ? '网页上选中的陌生词会自动回到这里。' : '安装插件后，可在任意网页直接收词。'}</p>
       </div>
     </aside>
   )

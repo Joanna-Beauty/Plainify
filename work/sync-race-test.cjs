@@ -255,7 +255,20 @@ async function run() {
   fakeWindow.postMessage({
     source: 'baihuaben-web',
     type: 'SYNC_ALL',
-    terms: storage.terms,
+    terms: [
+      ...storage.terms,
+      {
+        id: 'website-only-term',
+        term: 'RAG',
+        explanation: '先检索资料，再让模型参考资料回答。',
+        analogy: '像开卷考试先翻资料。',
+        category: '大模型基础',
+        source: '网站示例',
+        createdAt: '2026-08-30T00:00:00.000Z',
+        updatedAt: '2026-08-30T00:00:00.000Z',
+        status: 'ready',
+      },
+    ],
     settings: {
       apiKey: 'sk-new',
       provider: 'openai',
@@ -272,6 +285,46 @@ async function run() {
     hoverExplanationMode: 'analogy',
     model: 'gpt-5',
     provider: 'openai',
+  })
+  assert.equal(storage.terms.find((item) => item.id === 'website-only-term').term, 'RAG')
+  assert.equal(
+    storage.terms.find((item) => item.id === 'website-only-term').explanation,
+    '先检索资料，再让模型参考资料回答。',
+  )
+
+  const openAiPreviewPromise = sendToBackground({
+    type: 'EXPLAIN_TERM',
+    term: 'Active provider',
+    source: '测试文章',
+    sourceUrl: 'https://example.com/provider',
+  })
+  await waitFor(() => fetches.length === 1, 'OpenAI backend request')
+  const openAiRequest = fetches.shift()
+  assert.deepEqual(JSON.parse(openAiRequest.options.body), {
+    term: 'Active provider',
+    provider: 'openai',
+    model: 'gpt-5',
+  })
+  openAiRequest.resolve({
+    ok: true,
+    async json() {
+      return {
+        ok: true,
+        explanation: '当前生成请求使用已选中的提供方。',
+        analogy: '像按当前选中的线路发车。',
+        category: '大模型基础',
+        provider: 'OpenAI',
+        providerId: 'openai',
+        model: 'gpt-5',
+      }
+    },
+  })
+  const openAiPreview = await openAiPreviewPromise
+  assert.equal(openAiPreview.term.explanation, '当前生成请求使用已选中的提供方。')
+  assert.deepEqual(clone(openAiPreview.modelInfo), {
+    provider: 'openai',
+    providerName: 'OpenAI',
+    model: 'gpt-5',
   })
   assert.ok(appMessages.some((message) => (
     message.source === 'baihuaben-extension'
@@ -300,6 +353,9 @@ async function run() {
   console.log('PASS newer website edits can explicitly clear source metadata')
   console.log('PASS stale ready terms cannot overwrite a saved analogy with an empty value')
   console.log('PASS explanation, analogy, and hover settings survive synchronization')
+  console.log('PASS website-only terms survive their first synchronization without being blanked')
+  console.log('PASS extension requests use the provider and model selected on the website')
+  console.log('PASS explanation responses report the provider and model actually used')
   console.log('PASS legacy API Key and base URL are removed while provider selection remains available')
   console.log('PASS floating-panel archive reaches website sync without changing review mastery')
 }

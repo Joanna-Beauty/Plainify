@@ -1,7 +1,6 @@
 import http from 'node:http'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { spawn } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 
 const HOST = '127.0.0.1'
@@ -24,6 +23,33 @@ const PROVIDERS = {
     defaultBaseUrl: 'https://api.openai.com/v1',
     defaultModel: 'gpt-4o-mini',
     fallbackModels: ['gpt-4o-mini', 'gpt-4.1-mini', 'gpt-4.1', 'gpt-4o'],
+  },
+  qwen: {
+    id: 'qwen',
+    name: '阿里云百炼',
+    envKey: 'DASHSCOPE_API_KEY',
+    baseUrlEnvKey: 'DASHSCOPE_BASE_URL',
+    defaultBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    defaultModel: 'qwen-plus',
+    fallbackModels: ['qwen-plus', 'qwen3.8-max', 'qwen3.7-plus'],
+  },
+  moonshot: {
+    id: 'moonshot',
+    name: 'Moonshot AI',
+    envKey: 'MOONSHOT_API_KEY',
+    baseUrlEnvKey: 'MOONSHOT_BASE_URL',
+    defaultBaseUrl: 'https://api.moonshot.cn/v1',
+    defaultModel: 'kimi-k3',
+    fallbackModels: ['kimi-k3', 'kimi-k2.6', 'kimi-k2.5'],
+  },
+  zhipu: {
+    id: 'zhipu',
+    name: '智谱 AI',
+    envKey: 'ZHIPU_API_KEY',
+    baseUrlEnvKey: 'ZHIPU_BASE_URL',
+    defaultBaseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    defaultModel: 'glm-5.3-flash',
+    fallbackModels: ['glm-5.3-flash', 'glm-5.3', 'glm-5.2'],
   },
 }
 const DEFAULT_PROVIDER = 'deepseek'
@@ -105,10 +131,9 @@ function resolveBaseUrl(provider, override, hasOverride = false) {
 
 function activeProviderId() {
   const preferred = String(process.env.PLAINIFY_AI_PROVIDER || '').toLowerCase()
-  if (PROVIDERS[preferred]) return preferred
-  if (String(process.env.DEEPSEEK_API_KEY || '').trim()) return 'deepseek'
-  if (String(process.env.OPENAI_API_KEY || '').trim()) return 'openai'
-  return DEFAULT_PROVIDER
+  if (PROVIDERS[preferred] && String(process.env[PROVIDERS[preferred].envKey] || '').trim()) return preferred
+  const configured = Object.values(PROVIDERS).find((provider) => String(process.env[provider.envKey] || '').trim())
+  return configured?.id || (PROVIDERS[preferred]?.id || DEFAULT_PROVIDER)
 }
 
 function setProviderReady(providerId, message = '') {
@@ -451,28 +476,14 @@ async function requestCompletion(messages, model, maxTokens = 900, providerId = 
   return content
 }
 
-async function validateProviderModel(config, model) {
-  if (config.mock) return
-  const body = {
-    model,
-    messages: [{ role: 'user', content: '只回复 1' }],
-    max_tokens: 20,
-  }
-  if (!/^(?:o[134](?:-|$)|gpt-5)/i.test(model)) body.temperature = 0
-  const data = await requestProvider('/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  }, config, { updateState: false })
-  if (!data.choices?.[0]?.message?.content) {
-    throw new ApiError(502, `${config.provider.name} 当前模型没有返回可用内容`, 'empty_model_response')
-  }
-}
-
 function isUsableModel(providerId, modelId) {
-  if (providerId !== 'openai') return true
-  return /^(?:gpt-|chatgpt-|o[134](?:-|$))/i.test(modelId)
-    && !/(?:realtime|audio|transcribe|tts|image|search|embedding|moderation)/i.test(modelId)
+  const blockedCapability = /(?:realtime|audio|transcribe|tts|image|vision|ocr|search|embedding|rerank|moderation|video|wan-|cosyvoice)/i
+  if (blockedCapability.test(modelId)) return false
+  if (providerId === 'openai') return /^(?:gpt-|chatgpt-|o[134](?:-|$))/i.test(modelId)
+  if (providerId === 'qwen') return /^(?:qwen|deepseek|kimi|glm|minimax|baichuan|llama|mistral)/i.test(modelId)
+  if (providerId === 'moonshot') return /^(?:kimi-|moonshot-)/i.test(modelId)
+  if (providerId === 'zhipu') return /^glm-/i.test(modelId)
+  return true
 }
 
 async function listProviderModels(config, options = {}) {
@@ -483,7 +494,7 @@ async function listProviderModels(config, options = {}) {
       .map((item) => String(item.id || '').trim())
       .filter((id) => id && isUsableModel(config.providerId, id)))]
     : []
-  return (models.length ? models : config.provider.fallbackModels).sort((a, b) => {
+  return models.sort((a, b) => {
     if (a === config.provider.defaultModel) return -1
     if (b === config.provider.defaultModel) return 1
     return a.localeCompare(b)
@@ -558,24 +569,6 @@ async function persistConfigValues(updates) {
   return pending
 }
 
-async function openConfigFile() {
-  await fs.mkdir(path.dirname(configFilePath), { recursive: true })
-  await fs.writeFile(configFilePath, '', { flag: 'a', mode: 0o600 })
-  const launcher = process.platform === 'darwin'
-    ? { command: 'open', args: [configFilePath] }
-    : process.platform === 'win32'
-      ? { command: 'cmd', args: ['/c', 'start', '', configFilePath] }
-      : { command: 'xdg-open', args: [configFilePath] }
-  await new Promise((resolve, reject) => {
-    const child = spawn(launcher.command, launcher.args, { detached: true, stdio: 'ignore' })
-    child.once('error', reject)
-    child.once('spawn', () => {
-      child.unref()
-      resolve()
-    })
-  })
-}
-
 async function saveCredential(providerId, input = {}) {
   const provider = providerDefinition(providerId)
   const secret = String(input.apiKey || process.env[provider.envKey] || '').trim()
@@ -597,11 +590,16 @@ async function saveCredential(providerId, input = {}) {
       `${provider.id}_model_not_available`,
     )
   }
-  await validateProviderModel(candidate, selectedModel)
+  const hasOtherConfiguredProvider = Object.values(PROVIDERS).some((item) => (
+    item.id !== provider.id && String(process.env[item.envKey] || '').trim()
+  ))
+  const shouldActivate = input.activate !== false || !hasOtherConfiguredProvider
   const updates = {
     [provider.envKey]: secret,
-    PLAINIFY_AI_PROVIDER: provider.id,
-    PLAINIFY_AI_MODEL: selectedModel,
+    ...(shouldActivate ? {
+      PLAINIFY_AI_PROVIDER: provider.id,
+      PLAINIFY_AI_MODEL: selectedModel,
+    } : {}),
   }
   if (hasBaseUrl) {
     updates[provider.baseUrlEnvKey] = candidate.baseUrl === provider.defaultBaseUrl
@@ -609,8 +607,18 @@ async function saveCredential(providerId, input = {}) {
       : candidate.baseUrl
   }
   await persistConfigValues(updates)
-  setProviderReady(provider.id, `${provider.name} API Key 已验证`)
-  return { provider: providerSummary(provider), models, activeProvider: provider.id, activeModel: selectedModel }
+  setProviderReady(provider.id, `${provider.name} 凭据与模型目录已验证`)
+  const activeProvider = activeProviderId()
+  const activeModel = activeProvider === provider.id
+    ? selectedModel
+    : normalizeModel(activeProvider, process.env.PLAINIFY_AI_MODEL)
+  return {
+    provider: providerSummary(provider),
+    models,
+    savedModel: selectedModel,
+    activeProvider,
+    activeModel,
+  }
 }
 
 async function routeRequest(request, response, origin) {
@@ -651,14 +659,7 @@ async function routeRequest(request, response, origin) {
     return
   }
 
-  if (request.method === 'POST' && url.pathname === '/api/settings/open-config') {
-    requireSettingsOrigin(origin)
-    await openConfigFile()
-    sendJson(response, 200, { ok: true }, origin)
-    return
-  }
-
-  const providerRoute = url.pathname.match(/^\/api\/ai\/providers\/([^/]+)\/(credentials|models|test)$/)
+  const providerRoute = url.pathname.match(/^\/api\/ai\/providers\/([^/]+)\/(credentials|models)$/)
   if (providerRoute) {
     requireSettingsOrigin(origin)
     const provider = providerDefinition(decodeURIComponent(providerRoute[1]))
@@ -685,10 +686,19 @@ async function routeRequest(request, response, origin) {
       return
     }
     if (request.method === 'DELETE' && action === 'credentials') {
+      const wasActive = activeProviderId() === provider.id
       await persistConfigValues({
         [provider.envKey]: null,
         [provider.baseUrlEnvKey]: null,
       })
+      if (wasActive) {
+        const nextProviderId = activeProviderId()
+        const nextProvider = providerDefinition(nextProviderId)
+        await persistConfigValues({
+          PLAINIFY_AI_PROVIDER: nextProvider.id,
+          PLAINIFY_AI_MODEL: nextProvider.defaultModel,
+        })
+      }
       providerStates[provider.id] = {
         status: 'not_configured',
         code: 'backend_not_configured',
@@ -697,15 +707,6 @@ async function routeRequest(request, response, origin) {
         recoverable: false,
       }
       sendJson(response, 200, { ok: true, provider: providerSummary(provider) }, origin)
-      return
-    }
-    if (request.method === 'POST' && action === 'test') {
-      const body = await readJson(request)
-      const content = await requestCompletion([
-        { role: 'system', content: '只回复“连接成功”。' },
-        { role: 'user', content: '测试连接' },
-      ], body.model, 20, provider.id)
-      sendJson(response, 200, { ok: true, message: content.trim() }, origin)
       return
     }
   }
@@ -724,9 +725,8 @@ async function routeRequest(request, response, origin) {
         `${provider.id}_model_not_available`,
       )
     }
-    await validateProviderModel(config, model)
     await persistConfigValues({ PLAINIFY_AI_PROVIDER: provider.id, PLAINIFY_AI_MODEL: model })
-    setProviderReady(provider.id, `${provider.name} · ${model} 已连接`)
+    setProviderReady(provider.id, `${provider.name} · ${model} 已选中`)
     sendJson(response, 200, { ok: true, activeProvider: provider.id, activeModel: model }, origin)
     return
   }
@@ -734,6 +734,9 @@ async function routeRequest(request, response, origin) {
   if (request.method === 'POST' && url.pathname === '/api/explain') {
     const body = await readJson(request)
     const term = requireTerm(body.term)
+    const providerId = activeProviderId()
+    const provider = providerDefinition(providerId)
+    const model = normalizeModel(providerId, process.env.PLAINIFY_AI_MODEL)
     const content = await requestCompletion([
       {
         role: 'system',
@@ -743,7 +746,7 @@ async function routeRequest(request, response, origin) {
         role: 'user',
         content: `解释术语“${term}”。返回：{"explanation":"2到3句大白话解释","analogy":"一句生活化类比"}`,
       },
-    ], body.model, 450, body.provider)
+    ], model, 450, providerId)
     const result = extractJson(content)
     if (!result.explanation) throw new ApiError(502, '模型没有给出解释', 'empty_explanation')
     sendJson(response, 200, {
@@ -752,6 +755,9 @@ async function routeRequest(request, response, origin) {
       explanation: String(result.explanation),
       analogy: String(result.analogy || ''),
       category: '未分组',
+      provider: provider.name,
+      providerId,
+      model,
     }, origin)
     return
   }

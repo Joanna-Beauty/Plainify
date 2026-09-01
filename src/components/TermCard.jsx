@@ -1,8 +1,9 @@
-import { ArchiveRestore, Check, Clock3, ExternalLink, MoreHorizontal, Sparkles, Trash2 } from 'lucide-react'
+import { ArchiveRestore, Check, Clock3, ExternalLink, LoaderCircle, MoreHorizontal, Sparkles, Trash2 } from 'lucide-react'
 import { archivedCategoryFor } from '../data/archive'
 
-export default function TermCard({ term, onArchive, onDelete, onOpen, onRestore, onExplain }) {
+export default function TermCard({ term, busy, onArchive, onDelete, onOpen, onRestore, onExplain }) {
   const isPending = term.status !== 'ready'
+  const isGenerating = busy === `explain:${term.id}`
   const displayCategory = term.archived ? archivedCategoryFor(term) : term.category
   let sourceHost = ''
   if (term.sourceUrl) {
@@ -47,16 +48,24 @@ export default function TermCard({ term, onArchive, onDelete, onOpen, onRestore,
           ) : <span className="term-source">{term.source}</span>}
         </div>
         {isPending ? (
-          <div className="pending-explanation">
-            <Clock3 aria-hidden="true" size={16} />
-            <span>已收录，等待生成大白话解释。</span>
+          <div aria-busy={isGenerating} className="pending-explanation" data-state={isGenerating ? 'loading' : 'idle'}>
+            {isGenerating
+              ? <LoaderCircle aria-hidden="true" className="spin" size={16} />
+              : <Clock3 aria-hidden="true" size={16} />}
+            <span aria-atomic="true" aria-live="polite">
+              {isGenerating ? '正在生成大白话解释，通常需要几秒。' : '已收录，等待生成大白话解释。'}
+            </span>
             <button
+              aria-label={isGenerating ? `正在生成 ${term.term} 的解释` : `生成 ${term.term} 的解释`}
               className="text-button"
+              disabled={Boolean(busy)}
               onClick={(event) => { event.stopPropagation(); onExplain(term.id) }}
               type="button"
             >
-              <Sparkles aria-hidden="true" size={14} />
-              生成解释
+              {isGenerating
+                ? <LoaderCircle aria-hidden="true" className="spin" size={14} />
+                : <Sparkles aria-hidden="true" size={14} />}
+              {isGenerating ? '生成中' : '生成解释'}
             </button>
           </div>
         ) : (

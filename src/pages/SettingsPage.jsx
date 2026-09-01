@@ -2,15 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Check,
   CheckCircle2,
-  ChevronDown,
-  ChevronRight,
-  CloudDownload,
   Copy,
   Database,
+  Edit3,
   Eye,
   EyeOff,
   ExternalLink,
-  FileCog,
   KeyRound,
   ListChecks,
   LoaderCircle,
@@ -18,10 +15,11 @@ import {
   MessageCircle,
   MessagesSquare,
   Plus,
-  Puzzle,
   RefreshCcw,
   Save,
+  ServerCog,
   Settings2,
+  ShieldCheck,
   TvMinimalPlay,
   Trash2,
   X,
@@ -33,7 +31,6 @@ import {
   fetchProviderModels,
   getAiProviders,
   getBackendStatus,
-  openLocalConfigFile,
   saveProviderCredential,
 } from '../services/ai'
 
@@ -57,12 +54,26 @@ const CONTACT_CHANNELS = [
 
 const FEEDBACK_FORM_URL = 'https://my.feishu.cn/share/base/form/shrcnNIBOZIPMz8pMKyFIqZLtmb'
 
+const HOVER_MODE_OPTIONS = [
+  {
+    value: 'both',
+    label: '解释和类比',
+    description: '同时展示两种内容，悬停卡片会更长。',
+  },
+  {
+    value: 'explanation',
+    label: '大白话解释',
+    description: '快速查看术语的核心含义。',
+  },
+  {
+    value: 'analogy',
+    label: '生活化类比',
+    description: '用熟悉的生活场景帮助理解。',
+  },
+]
+
 function uniqueModels(...groups) {
   return [...new Set(groups.flat().map((model) => String(model || '').trim()).filter(Boolean))]
-}
-
-function comparableBaseUrl(value) {
-  return String(value || '').trim().replace(/\/+$/, '')
 }
 
 function providerCatalog(settings, provider) {
@@ -70,25 +81,12 @@ function providerCatalog(settings, provider) {
     .filter((model) => model !== provider.defaultModel)
 }
 
-function modelDisplayName(modelId) {
-  return String(modelId)
-    .split('-')
-    .map((part) => {
-      if (/^gpt$/i.test(part)) return 'GPT'
-      if (/^deepseek$/i.test(part)) return 'DeepSeek'
-      if (/^o\d/i.test(part)) return part.toUpperCase()
-      if (/^\d/.test(part)) return part
-      return part.charAt(0).toUpperCase() + part.slice(1)
-    })
-    .join(' ')
-}
-
 export default function SettingsPage({
   settings,
+  initialTab = 'general',
   onClose,
   onSave,
   extensionReady,
-  onSyncExtension,
   onProviderResolved,
   showToast,
 }) {
@@ -96,7 +94,7 @@ export default function SettingsPage({
   const showToastRef = useRef(showToast)
   const onProviderResolvedRef = useRef(onProviderResolved)
   const apiKeyInputRef = useRef(null)
-  const [activeTab, setActiveTab] = useState('general')
+  const [activeTab, setActiveTab] = useState(initialTab)
   const [draft, setDraft] = useState(normalizedSettings)
   const [providers, setProviders] = useState(() => modelProviders.map((provider) => ({
     ...provider,
@@ -104,12 +102,12 @@ export default function SettingsPage({
     keyLastFour: '',
   })))
   const [activeProviderId, setActiveProviderId] = useState(normalizedSettings.provider)
-  const [selectedModelsByProvider, setSelectedModelsByProvider] = useState(() => ({
-    [normalizedSettings.provider]: normalizedSettings.model,
-  }))
+  const [selectedModelsByProvider, setSelectedModelsByProvider] = useState(
+    () => normalizedSettings.providerModels,
+  )
   const [providerEditorOpen, setProviderEditorOpen] = useState(false)
   const [providerEditorMode, setProviderEditorMode] = useState('add')
-  const [customSettingsOpen, setCustomSettingsOpen] = useState(false)
+  const [endpointMode, setEndpointMode] = useState('official')
   const [selectedProviderId, setSelectedProviderId] = useState(normalizedSettings.provider)
   const [editorCatalog, setEditorCatalog] = useState([])
   const [editorModel, setEditorModel] = useState(normalizedSettings.model)
@@ -119,11 +117,10 @@ export default function SettingsPage({
   const [loading, setLoading] = useState(true)
   const [savingProvider, setSavingProvider] = useState(false)
   const [deleting, setDeleting] = useState(false)
-  const [openingConfig, setOpeningConfig] = useState(false)
   const [loadingModels, setLoadingModels] = useState(false)
   const [availableModels, setAvailableModels] = useState([])
-  const [checkedModels, setCheckedModels] = useState(() => new Set())
-  const [modelDialogOpen, setModelDialogOpen] = useState(false)
+  const [verification, setVerification] = useState({ status: 'idle', message: '' })
+  const [switchingProviderId, setSwitchingProviderId] = useState('')
   const [backend, setBackend] = useState({
     connected: false,
     configured: false,
@@ -138,15 +135,8 @@ export default function SettingsPage({
   const providerStatus = providers.find((provider) => provider.id === selectedProvider.id) || selectedProvider
   const configuredProviders = providers.filter((provider) => provider.configured)
   const availableProviders = providers.filter((provider) => !provider.configured)
-  const catalogModelSet = useMemo(() => new Set(editorCatalog), [editorCatalog])
-  const modelsAvailableToAdd = useMemo(
-    () => availableModels.filter((model) => (
-      model !== selectedProvider.defaultModel && !catalogModelSet.has(model)
-    )),
-    [availableModels, catalogModelSet, selectedProvider.defaultModel],
-  )
-  const allModelsChecked = modelsAvailableToAdd.length > 0
-    && modelsAvailableToAdd.every((model) => checkedModels.has(model))
+  const activeProvider = providers.find((provider) => provider.id === activeProviderId)
+    || getProvider(activeProviderId)
 
   useEffect(() => {
     showToastRef.current = showToast
@@ -167,8 +157,7 @@ export default function SettingsPage({
     document.body.style.overflow = 'hidden'
     function handleKeyDown(event) {
       if (event.key !== 'Escape') return
-      if (modelDialogOpen) setModelDialogOpen(false)
-      else if (providerEditorOpen) setProviderEditorOpen(false)
+      if (providerEditorOpen) setProviderEditorOpen(false)
       else onClose()
     }
     document.addEventListener('keydown', handleKeyDown)
@@ -176,7 +165,7 @@ export default function SettingsPage({
       document.body.style.overflow = previousOverflow
       document.removeEventListener('keydown', handleKeyDown)
     }
-  }, [modelDialogOpen, onClose, providerEditorOpen])
+  }, [onClose, providerEditorOpen])
 
   const refreshOverview = useCallback(async (signal) => {
     setLoading(true)
@@ -200,8 +189,16 @@ export default function SettingsPage({
         ...current,
         provider: nextProviderId,
         model: nextModel,
+        providerModels: {
+          ...current.providerModels,
+          [nextProviderId]: nextModel,
+        },
       }))
-      onProviderResolvedRef.current?.({ provider: nextProviderId, model: nextModel })
+      onProviderResolvedRef.current?.({
+        provider: nextProviderId,
+        model: nextModel,
+        configured: Boolean(nextProviders.some((provider) => provider.configured)),
+      })
       return { providers: nextProviders, activeProviderId: nextProviderId, activeModel: nextModel }
     } catch (error) {
       if (error.name === 'AbortError') return null
@@ -254,18 +251,20 @@ export default function SettingsPage({
     const currentStatus = providers.find((item) => item.id === provider.id)
     const nextModel = provider.id === activeProviderId
       ? draft.model
-      : selectedModelsByProvider[provider.id] || provider.defaultModel
+      : selectedModelsByProvider[provider.id] || draft.providerModels?.[provider.id] || provider.defaultModel
+    const storedCatalog = uniqueModels(provider.defaultModel, providerCatalog(draft, provider), nextModel)
     setSelectedProviderId(provider.id)
     setEditorModel(nextModel)
-    setEditorCatalog(providerCatalog(draft, provider))
+    setEditorCatalog(storedCatalog.filter((model) => model !== provider.defaultModel))
     setProviderEditorMode(mode)
-    setCustomSettingsOpen(false)
+    setEndpointMode(currentStatus?.customBaseUrl ? 'custom' : 'official')
     setApiKey('')
     setApiBaseUrl(currentStatus?.baseUrl || provider.baseUrl)
     setShowKey(false)
-    setAvailableModels([])
-    setCheckedModels(new Set())
-    setModelDialogOpen(false)
+    setAvailableModels(mode === 'edit' ? storedCatalog : [])
+    setVerification(mode === 'edit'
+      ? { status: 'success', message: '配置已保存；更换密钥或地址后需要重新测试。' }
+      : { status: 'idle', message: '' })
   }
 
   function openAddProvider() {
@@ -287,14 +286,12 @@ export default function SettingsPage({
     setApiBaseUrl('')
     setShowKey(false)
     setAvailableModels([])
-    setCheckedModels(new Set())
-    setModelDialogOpen(false)
+    setVerification({ status: 'idle', message: '' })
   }
 
   function selectSettingsTab(tabId) {
     if (tabId === activeTab) return
     closeProviderEditor()
-    setCustomSettingsOpen(false)
     setActiveTab(tabId)
   }
 
@@ -302,44 +299,86 @@ export default function SettingsPage({
     resetProviderEditor(providerId, 'add')
   }
 
-  function nextSettingsFor(provider, model, catalog = editorCatalog) {
+  function nextSettingsFor(provider, model, catalog = editorCatalog, makeActive = true) {
     return normalizeProviderSettings({
       ...draft,
-      provider: provider.id,
-      model,
+      ...(makeActive ? { provider: provider.id, model } : {}),
       modelCatalogs: {
         ...draft.modelCatalogs,
         [provider.id]: uniqueModels(catalog).filter((item) => item !== provider.defaultModel),
+      },
+      providerModels: {
+        ...draft.providerModels,
+        [provider.id]: model,
       },
     })
   }
 
   function applySavedProvider(result, catalog = editorCatalog) {
-    const provider = getProvider(result.activeProvider)
-    const activeModel = result.activeModel || provider.defaultModel
+    const savedProvider = selectedProvider
+    const savedModel = result.savedModel || editorModel || savedProvider.defaultModel
     const nextCatalog = uniqueModels(catalog, result.models || [])
-      .filter((model) => model !== provider.defaultModel)
-    const next = nextSettingsFor(provider, activeModel, nextCatalog)
-    setProviders((current) => current.map((item) => item.id === provider.id
+      .filter((model) => model !== savedProvider.defaultModel)
+    const nextActiveProvider = getProvider(result.activeProvider)
+    const nextActiveModel = result.activeModel || draft.providerModels?.[nextActiveProvider.id]
+      || nextActiveProvider.defaultModel
+    const next = normalizeProviderSettings({
+      ...nextSettingsFor(savedProvider, savedModel, nextCatalog, false),
+      provider: nextActiveProvider.id,
+      model: nextActiveModel,
+    })
+    setProviders((current) => current.map((item) => item.id === savedProvider.id
       ? { ...item, ...result.provider, configured: true }
       : item))
-    setActiveProviderId(provider.id)
-    setSelectedProviderId(provider.id)
-    setSelectedModelsByProvider((current) => ({ ...current, [provider.id]: activeModel }))
-    setEditorModel(activeModel)
-    setEditorCatalog(nextCatalog)
-    setApiBaseUrl(result.provider?.baseUrl || provider.baseUrl)
-    setDraft(next)
-    setBackend((current) => ({
+    setActiveProviderId(nextActiveProvider.id)
+    setSelectedProviderId(savedProvider.id)
+    setSelectedModelsByProvider((current) => ({
       ...current,
-      connected: true,
-      configured: true,
-      ready: true,
-      providerStatus: 'ready',
-      recoverable: false,
+      [savedProvider.id]: savedModel,
+      [nextActiveProvider.id]: nextActiveModel,
     }))
+    setEditorModel(savedModel)
+    setEditorCatalog(nextCatalog)
+    setApiBaseUrl(result.provider?.baseUrl || savedProvider.baseUrl)
+    setDraft(next)
+    if (nextActiveProvider.id === savedProvider.id) {
+      setBackend((current) => ({
+        ...current,
+        connected: true,
+        configured: true,
+        ready: true,
+        providerStatus: 'ready',
+        recoverable: false,
+      }))
+    }
     onSave(next)
+    onProviderResolvedRef.current?.({
+      provider: nextActiveProvider.id,
+      model: nextActiveModel,
+      configured: true,
+    })
     return next
+  }
+
+  function invalidateVerification() {
+    setVerification({ status: 'idle', message: '' })
+    setAvailableModels([])
+  }
+
+  function updateApiKey(value) {
+    setApiKey(value)
+    invalidateVerification()
+  }
+
+  function selectEndpointMode(mode) {
+    setEndpointMode(mode)
+    setApiBaseUrl(mode === 'official' ? selectedProvider.baseUrl : '')
+    invalidateVerification()
+  }
+
+  function updateApiBaseUrl(value) {
+    setApiBaseUrl(value)
+    invalidateVerification()
   }
 
   async function saveProvider(event) {
@@ -350,39 +389,29 @@ export default function SettingsPage({
       return
     }
 
+    if (verification.status !== 'success' || !availableModels.includes(editorModel)) {
+      showToast('请先完成联通测试并选择一个可用模型。')
+      return
+    }
+
     setSavingProvider(true)
     try {
-      const baseUrlChanged = comparableBaseUrl(apiBaseUrl) !== comparableBaseUrl(providerStatus.baseUrl || selectedProvider.baseUrl)
-      if (apiKey.trim() || providerEditorMode === 'add' || baseUrlChanged) {
-        const result = await saveProviderCredential(
-          selectedProvider.id,
-          apiKey.trim(),
-          editorModel,
-          apiBaseUrl.trim(),
-        )
-        applySavedProvider(result)
-        setApiKey('')
-        setShowKey(false)
-        setProviderEditorMode('edit')
-        setCustomSettingsOpen(true)
-        showToast(`${selectedProvider.name} 配置已验证并保存在本机。`, 'success')
-      } else {
-        const result = await activateProvider(selectedProvider.id, editorModel)
-        const next = nextSettingsFor(selectedProvider, result.activeModel)
-        setActiveProviderId(result.activeProvider)
-        setSelectedModelsByProvider((current) => ({
-          ...current,
-          [result.activeProvider]: result.activeModel,
-        }))
-        setDraft(next)
-        onSave(next)
-        showToast(
-          result.activeModel === selectedProvider.defaultModel
-            ? `已恢复为 ${selectedProvider.name} 官方默认模型。`
-            : `已切换到 ${selectedProvider.name} · ${result.activeModel}。`,
-          'success',
-        )
-      }
+      const shouldActivate = configuredProviders.length === 0 || selectedProvider.id === activeProviderId
+      const result = await saveProviderCredential(
+        selectedProvider.id,
+        apiKey.trim(),
+        editorModel,
+        apiBaseUrl.trim(),
+        shouldActivate,
+      )
+      applySavedProvider(result, availableModels)
+      closeProviderEditor()
+      showToast(
+        shouldActivate
+          ? `${selectedProvider.name} 已保存并设为当前模型服务。`
+          : `${selectedProvider.name} 已保存，可在服务列表中切换使用。`,
+        'success',
+      )
     } catch (error) {
       showToast(error.message)
     } finally {
@@ -391,7 +420,17 @@ export default function SettingsPage({
   }
 
   async function fetchAvailableModels() {
+    if (providerEditorMode === 'add' && !apiKey.trim()) {
+      showToast(`请先填写 ${selectedProvider.name} API Key。`)
+      apiKeyInputRef.current?.focus()
+      return
+    }
+    if (!apiBaseUrl.trim()) {
+      showToast('请先填写 API 地址。')
+      return
+    }
     setLoadingModels(true)
+    setVerification({ status: 'loading', message: '' })
     try {
       const remoteModels = await fetchProviderModels({
         provider: selectedProvider.id,
@@ -399,39 +438,53 @@ export default function SettingsPage({
         baseUrl: apiBaseUrl.trim(),
       })
       const discoveredModels = uniqueModels(remoteModels)
-      const selectableModels = discoveredModels.filter((model) => (
-        model !== selectedProvider.defaultModel && !catalogModelSet.has(model)
-      ))
+      if (!discoveredModels.length) throw new Error('当前 API 地址没有返回可用的文本模型。')
+      const preferredModel = providerEditorMode === 'edit' && discoveredModels.includes(editorModel)
+        ? editorModel
+        : discoveredModels.includes(selectedProvider.defaultModel)
+          ? selectedProvider.defaultModel
+          : discoveredModels[0]
       setAvailableModels(discoveredModels)
-      setCheckedModels(new Set(selectableModels))
-      setModelDialogOpen(true)
+      setEditorCatalog(discoveredModels.filter((model) => model !== selectedProvider.defaultModel))
+      setEditorModel(preferredModel)
+      setVerification({
+        status: 'success',
+        message: `联通成功，已获取 ${discoveredModels.length} 个可用模型；未发起对话生成。`,
+      })
     } catch (error) {
+      setVerification({ status: 'error', message: error.message })
       showToast(error.message)
     } finally {
       setLoadingModels(false)
     }
   }
 
-  function addSelectedModels() {
-    const selectedModels = modelsAvailableToAdd.filter((model) => checkedModels.has(model))
-    if (!selectedModels.length) return
-    setEditorCatalog((current) => uniqueModels(current, selectedModels))
-    setModelDialogOpen(false)
-    showToast(`已选择 ${selectedModels.length} 个模型，点击保存后生效。`, 'success')
-  }
-
-  function restoreDefaultModel() {
-    setEditorModel(selectedProvider.defaultModel)
-    setEditorCatalog([])
-    setAvailableModels([])
-    setCheckedModels(new Set())
-    setModelDialogOpen(false)
-    showToast(`已恢复官方默认模型 ${selectedProvider.defaultModel}，点击保存后生效。`)
-  }
-
-  function removeCatalogModel(model) {
-    setEditorCatalog((current) => current.filter((item) => item !== model))
-    if (editorModel === model) setEditorModel(selectedProvider.defaultModel)
+  async function switchProvider(provider) {
+    if (provider.id === activeProviderId || switchingProviderId) return
+    const model = selectedModelsByProvider[provider.id]
+      || draft.providerModels?.[provider.id]
+      || provider.defaultModel
+    setSwitchingProviderId(provider.id)
+    try {
+      const result = await activateProvider(provider.id, model)
+      const next = nextSettingsFor(provider, result.activeModel, providerCatalog(draft, provider))
+      setActiveProviderId(result.activeProvider)
+      setSelectedModelsByProvider((current) => ({ ...current, [provider.id]: result.activeModel }))
+      setDraft(next)
+      setBackend((current) => ({
+        ...current,
+        configured: true,
+        ready: true,
+        providerStatus: 'ready',
+        recoverable: false,
+      }))
+      onSave(next)
+      showToast(`已切换到 ${provider.name} · ${result.activeModel}。`, 'success')
+    } catch (error) {
+      showToast(error.message)
+    } finally {
+      setSwitchingProviderId('')
+    }
   }
 
   async function removeKey() {
@@ -458,18 +511,6 @@ export default function SettingsPage({
     }
   }
 
-  async function openConfig() {
-    setOpeningConfig(true)
-    try {
-      await openLocalConfigFile()
-      showToast('已打开本机配置文件。', 'success')
-    } catch (error) {
-      showToast(error.message)
-    } finally {
-      setOpeningConfig(false)
-    }
-  }
-
   async function copyContact(label, value) {
     try {
       await navigator.clipboard.writeText(value)
@@ -489,15 +530,9 @@ export default function SettingsPage({
       <main aria-labelledby="settings-title" aria-modal="true" className="settings-dialog" role="dialog">
         <header className="settings-dialog-header">
           <h1 id="settings-title">设置</h1>
-          <div className="settings-header-actions">
-            <button className="config-file-button" disabled={openingConfig} onClick={openConfig} type="button">
-              {openingConfig ? <LoaderCircle className="spin" size={17} /> : <FileCog size={17} />}
-              打开配置文件
-            </button>
-            <button aria-label="关闭设置" className="settings-close-button" onClick={onClose} title="关闭设置" type="button">
-              <X size={25} />
-            </button>
-          </div>
+          <button aria-label="关闭设置" className="settings-close-button" onClick={onClose} title="关闭设置" type="button">
+            <X size={25} />
+          </button>
         </header>
 
         <div className="settings-dialog-body">
@@ -525,49 +560,73 @@ export default function SettingsPage({
                 </div>
 
                 <form className="general-settings-form" onSubmit={saveGeneral}>
-                  <section className="settings-block">
+                  <section className="settings-block extension-settings-block" data-general-setting="extension">
                     <div className="settings-block-heading">
-                      <div><h3>解释与收录</h3><p>控制新术语何时生成解释。</p></div>
-                    </div>
-                    <label className="preference-row">
-                      <span><strong>收录时自动解释</strong><small>关闭后，新术语会先进入待解释状态。</small></span>
-                      <input checked={draft.autoExplain} name="autoExplain" onChange={updateGeneral} type="checkbox" />
-                    </label>
-                    <fieldset className="hover-mode-field">
-                      <legend>网页悬停显示</legend>
-                      <div aria-label="鼠标悬停解释类型" className="segmented-control" role="group">
-                        {[
-                          ['explanation', '大白话解释'],
-                          ['analogy', '生活化类比'],
-                          ['both', '全部展示'],
-                        ].map(([value, label]) => (
-                          <button
-                            aria-pressed={draft.hoverExplanationMode === value}
-                            key={value}
-                            onClick={() => setDraft((current) => ({ ...current, hoverExplanationMode: value }))}
-                            type="button"
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                    </fieldset>
-                  </section>
-
-                  <section className="settings-block extension-settings-block">
-                    <div className="settings-block-heading">
-                      <div><h3>浏览器扩展</h3><p>同步术语和网页悬停偏好。</p></div>
+                      <div><h3>浏览器扩展</h3><p>扩展连接后，术语和网页悬停偏好会自动同步。</p></div>
                       <div className={extensionReady ? 'extension-check connected' : 'extension-check'}>
                         {extensionReady ? <CheckCircle2 size={15} /> : <span className="status-dot" />}
                         {extensionReady ? '已连接' : '未连接'}
                       </div>
                     </div>
-                    <div className="extension-setting-row">
-                      <div className="extension-directory"><span>本地扩展目录</span><code>extension/</code></div>
-                      <button className="secondary-button" disabled={!extensionReady} onClick={() => onSyncExtension(draft)} type="button">
-                        <Puzzle size={16} />同步到扩展
-                      </button>
+                    <div className="extension-directory"><span>本地扩展目录</span><code>extension/</code></div>
+                    {extensionReady ? (
+                      <div className="extension-install-success">
+                        <CheckCircle2 aria-hidden="true" size={17} />
+                        <span><strong>扩展已经可以使用</strong><small>网页选词和术语同步已连接。</small></span>
+                      </div>
+                    ) : (
+                      <div className="extension-install-guide">
+                        <ol>
+                          <li><span>1</span><p>打开 <code>chrome://extensions</code> 或 <code>edge://extensions</code></p></li>
+                          <li><span>2</span><p>开启“开发者模式”，点击“加载已解压的扩展程序”</p></li>
+                          <li><span>3</span><p>选择项目中的 <code>extension/</code>，再刷新本页面</p></li>
+                        </ol>
+                        <p className="extension-permission-note">
+                          <ShieldCheck aria-hidden="true" size={16} />
+                          网页权限仅用于读取你主动选中的文字和显示术语高亮；API Key 不会进入扩展。
+                        </p>
+                      </div>
+                    )}
+                  </section>
+
+                  <section className="general-preference-card settings-block" data-general-setting="capture">
+                    <div className="preference-section-heading">
+                      <h3>收录方式</h3>
+                      <p>决定新术语收录后是否立即生成解释。</p>
                     </div>
+                    <label className="preference-row">
+                      <span><strong>收录时自动解释</strong><small>关闭后，新术语会先进入待解释状态。</small></span>
+                      <input checked={draft.autoExplain} name="autoExplain" onChange={updateGeneral} type="checkbox" />
+                    </label>
+                  </section>
+
+                  <section className="general-preference-card settings-block" data-general-setting="hover">
+                    <div className="preference-section-heading">
+                      <h3>网页悬停卡片</h3>
+                      <p>选择鼠标停在网页高亮术语上时显示的内容。</p>
+                    </div>
+                    <fieldset className="hover-mode-field">
+                      <legend className="sr-only">网页悬停卡片内容</legend>
+                      <div className="hover-mode-options">
+                        {HOVER_MODE_OPTIONS.map(({ value, label, description }) => (
+                          <label
+                            className={draft.hoverExplanationMode === value
+                              ? 'hover-mode-option selected'
+                              : 'hover-mode-option'}
+                            key={value}
+                          >
+                            <input
+                              checked={draft.hoverExplanationMode === value}
+                              name="hoverExplanationMode"
+                              onChange={() => setDraft((current) => ({ ...current, hoverExplanationMode: value }))}
+                              type="radio"
+                              value={value}
+                            />
+                            <span><strong>{label}</strong><small>{description}</small></span>
+                          </label>
+                        ))}
+                      </div>
+                    </fieldset>
                   </section>
 
                   <div className="settings-actions">
@@ -578,199 +637,233 @@ export default function SettingsPage({
             ) : activeTab === 'model' ? (
               <div className="settings-pane" data-settings-tab="model">
                 <div className="settings-pane-heading model-pane-heading">
-                  <h2>模型</h2>
-                  <p>填入各提供方的 <mark>API</mark> 密钥即可使用其模型。</p>
+                  <h2>模型服务</h2>
+                  <p>配置多个模型服务，并选择当前用于生成解释的服务。</p>
                 </div>
 
-                <div className="configured-provider-list">
-                  {configuredProviders.map((provider) => {
-                    const ready = provider.id !== activeProviderId || backend.ready
-                    return (
-                      <section className="provider-summary" data-provider-id={provider.id} key={provider.id}>
-                        <div>
-                          <strong>{provider.name}<span className={ready ? 'provider-live-dot ready' : 'provider-live-dot'} /></strong>
-                        </div>
-                        <button onClick={() => openEditProvider(provider.id)} type="button">编辑</button>
-                      </section>
-                    )
-                  })}
-                </div>
+                <div className="model-service-workspace">
+                  <aside className="model-service-list" aria-label="已配置模型服务">
+                    <div className="configured-provider-list">
+                      {configuredProviders.map((provider) => {
+                        const isActive = provider.id === activeProviderId
+                        const model = selectedModelsByProvider[provider.id]
+                          || draft.providerModels?.[provider.id]
+                          || (isActive ? draft.model : provider.defaultModel)
+                        return (
+                          <section
+                            className={isActive ? 'provider-summary active' : 'provider-summary'}
+                            data-provider-id={provider.id}
+                            key={provider.id}
+                            style={{ '--provider-color': provider.color }}
+                          >
+                            <button
+                              aria-label={isActive ? `${provider.name} 当前正在使用` : `切换到 ${provider.name}`}
+                              aria-pressed={isActive}
+                              className="provider-summary-main"
+                              disabled={isActive || Boolean(switchingProviderId)}
+                              onClick={() => switchProvider(provider)}
+                              type="button"
+                            >
+                              <span className="provider-monogram">{provider.shortName}</span>
+                              <span className="provider-summary-copy">
+                                <strong>{provider.name}</strong>
+                                <small>{model}</small>
+                              </span>
+                              <span className={isActive ? 'provider-use-state active' : 'provider-use-state'}>
+                                {switchingProviderId === provider.id
+                                  ? <LoaderCircle className="spin" size={15} />
+                                  : isActive ? <Check size={15} /> : null}
+                                {isActive ? '当前使用' : '设为当前'}
+                              </span>
+                            </button>
+                            <button
+                              aria-label={`编辑 ${provider.name}`}
+                              className="provider-edit-button"
+                              onClick={() => openEditProvider(provider.id)}
+                              title="编辑配置"
+                              type="button"
+                            >
+                              <Edit3 size={17} />
+                            </button>
+                          </section>
+                        )
+                      })}
+                    </div>
 
-                {providerEditorOpen ? (
-                  <form className="provider-editor" data-editor-mode={providerEditorMode} onSubmit={saveProvider}>
-                    {providerEditorMode === 'edit' ? (
-                      <div className="provider-editor-title">
-                        <strong>{selectedProvider.name}</strong>
-                        <span>{selectedProvider.adapterId}</span>
-                      </div>
-                    ) : (
-                      <label className="provider-select-field">
-                        <span>提供方</span>
-                        <select onChange={(event) => selectProvider(event.target.value)} value={selectedProvider.id}>
-                          {availableProviders.map((provider) => (
-                            <option key={provider.id} value={provider.id}>{provider.name}</option>
-                          ))}
-                        </select>
-                      </label>
-                    )}
+                    {availableProviders.length ? (
+                      <button className="add-provider-button" disabled={loading} onClick={openAddProvider} type="button">
+                        {loading ? <LoaderCircle className="spin" size={18} /> : <Plus size={19} />}
+                        {loading ? '正在读取服务' : '添加模型服务'}
+                      </button>
+                    ) : null}
+                  </aside>
 
-                    <label className="provider-key-field">
-                      <span><mark>API</mark> 密钥{providerEditorMode === 'add' ? '（必填）' : ''}</span>
-                      <span className="password-field">
-                        <KeyRound aria-hidden="true" size={17} />
-                        <input
-                          autoComplete="off"
-                          name={`${selectedProvider.id}ApiKey`}
-                          onChange={(event) => setApiKey(event.target.value)}
-                          placeholder={providerStatus.configured ? '已配置，输入新值可替换' : selectedProvider.keyPlaceholder}
-                          ref={apiKeyInputRef}
-                          required={providerEditorMode === 'add'}
-                          type={showKey ? 'text' : 'password'}
-                          value={apiKey}
-                        />
-                        <button
-                          aria-label={showKey ? '隐藏 API Key' : '显示 API Key'}
-                          onClick={() => setShowKey((value) => !value)}
-                          title={showKey ? '隐藏 API Key' : '显示 API Key'}
-                          type="button"
-                        >
-                          {showKey ? <EyeOff size={18} /> : <Eye size={18} />}
-                        </button>
-                      </span>
-                    </label>
+                  <div className="model-service-detail">
+                    {providerEditorOpen ? (
+                      <form className="provider-editor" data-editor-mode={providerEditorMode} onSubmit={saveProvider}>
+                        <header className="provider-editor-title">
+                          <div>
+                            <strong>{providerEditorMode === 'add' ? '添加模型服务' : `编辑 ${selectedProvider.name}`}</strong>
+                            <span>{providerEditorMode === 'add' ? '完成联通测试后再选择模型。' : selectedProvider.protocol}</span>
+                          </div>
+                          <button aria-label="关闭编辑" onClick={closeProviderEditor} title="关闭" type="button"><X size={19} /></button>
+                        </header>
 
-                    <button
-                      aria-expanded={customSettingsOpen}
-                      className="custom-settings-toggle"
-                      onClick={() => setCustomSettingsOpen((open) => !open)}
-                      type="button"
-                    >
-                      {customSettingsOpen ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
-                      自定义设置
-                    </button>
+                        {providerEditorMode === 'add' ? (
+                          <label className="provider-select-field">
+                            <span>模型厂商</span>
+                            <select onChange={(event) => selectProvider(event.target.value)} value={selectedProvider.id}>
+                              {availableProviders.map((provider) => (
+                                <option key={provider.id} value={provider.id}>{provider.name}</option>
+                              ))}
+                            </select>
+                          </label>
+                        ) : null}
 
-                    {customSettingsOpen ? (
-                      <div className="custom-settings-content">
-                        <label className="adapter-url-field">
-                          <span><mark>API</mark> 地址</span>
-                          <input
-                            autoComplete="off"
-                            onChange={(event) => setApiBaseUrl(event.target.value)}
-                            placeholder={selectedProvider.baseUrl}
-                            type="url"
-                            value={apiBaseUrl}
-                          />
+                        <fieldset className="provider-endpoint-field">
+                          <legend>API 地址</legend>
+                          <div aria-label="API 地址类型" className="endpoint-mode-control" role="group">
+                            <button
+                              aria-pressed={endpointMode === 'official'}
+                              onClick={() => endpointMode !== 'official' && selectEndpointMode('official')}
+                              type="button"
+                            >官方 API</button>
+                            <button
+                              aria-pressed={endpointMode === 'custom'}
+                              onClick={() => endpointMode !== 'custom' && selectEndpointMode('custom')}
+                              type="button"
+                            >自定义地址</button>
+                          </div>
+                          {endpointMode === 'custom' ? (
+                            <input
+                              aria-label="自定义 API 地址"
+                              autoComplete="off"
+                              onChange={(event) => updateApiBaseUrl(event.target.value)}
+                              placeholder="https://your-api.example.com/v1"
+                              required
+                              type="url"
+                              value={apiBaseUrl}
+                            />
+                          ) : (
+                            <div className="official-endpoint-preview"><ServerCog size={16} /><span>{selectedProvider.baseUrl}</span></div>
+                          )}
+                        </fieldset>
+
+                        <label className="provider-key-field">
+                          <span className="provider-key-label">
+                            <span>API Key{providerEditorMode === 'add' ? '（必填）' : ''}</span>
+                            <a href={selectedProvider.consoleUrl} rel="noreferrer" target="_blank">
+                              获取 API Key
+                              <ExternalLink aria-hidden="true" size={13} />
+                            </a>
+                          </span>
+                          <span className="password-field">
+                            <KeyRound aria-hidden="true" size={17} />
+                            <input
+                              autoComplete="off"
+                              name={`${selectedProvider.id}ApiKey`}
+                              onChange={(event) => updateApiKey(event.target.value)}
+                              placeholder={providerStatus.configured ? `已保存 ····${providerStatus.keyLastFour || ''}` : selectedProvider.keyPlaceholder}
+                              ref={apiKeyInputRef}
+                              required={providerEditorMode === 'add'}
+                              type={showKey ? 'text' : 'password'}
+                              value={apiKey}
+                            />
+                            <button
+                              aria-label={showKey ? '隐藏 API Key' : '显示 API Key'}
+                              onClick={() => setShowKey((value) => !value)}
+                              title={showKey ? '隐藏 API Key' : '显示 API Key'}
+                              type="button"
+                            >
+                              {showKey ? <EyeOff size={18} /> : <Eye size={18} />}
+                            </button>
+                          </span>
                         </label>
 
-                        <section className="model-catalog-section">
-                          <div className="model-catalog-heading">
-                            <div>
-                              <h3>模型目录</h3>
-                              <p>
-                                正在使用 {editorModel === selectedProvider.defaultModel
-                                  ? `${selectedProvider.defaultModel}（官方默认）`
-                                  : editorModel}
-                              </p>
-                            </div>
-                            <div className="model-catalog-actions">
-                              {editorModel !== selectedProvider.defaultModel || editorCatalog.length ? (
-                                <button onClick={restoreDefaultModel} type="button">
-                                  <RefreshCcw size={15} />恢复默认模型
-                                </button>
-                              ) : null}
-                              <button
-                                disabled={loadingModels}
-                                onClick={fetchAvailableModels}
-                                title={`获取 ${selectedProvider.name} 可用模型`}
-                                type="button"
-                              >
-                                {loadingModels ? <LoaderCircle className="spin" size={15} /> : <CloudDownload size={15} />}
-                                获取可用模型
-                              </button>
-                            </div>
+                        <section className="model-verification" data-status={verification.status}>
+                          <div className="model-verification-copy">
+                            {verification.status === 'success' ? <CheckCircle2 size={20} /> : <ShieldCheck size={20} />}
+                            <span>
+                              <strong>{verification.status === 'success' ? '联通成功' : verification.status === 'error' ? '联通失败' : '尚未联通测试'}</strong>
+                              <small>{verification.message || '完成联通测试后，可以选择当前账号可用的模型。'}</small>
+                            </span>
                           </div>
-
-                          {editorCatalog.length ? (
-                            <div className="model-catalog-list">
-                              {editorCatalog.map((model) => {
-                                const current = editorModel === model
-                                return (
-                                  <div className={current ? 'model-catalog-row current' : 'model-catalog-row'} data-model-id={model} key={model}>
-                                    <span className="model-id-field">{model}</span>
-                                    <span className="model-name-field">{modelDisplayName(model)}</span>
-                                    <button
-                                      aria-label={current ? `${model} 已选择` : `使用 ${model}`}
-                                      className="model-activate-button"
-                                      disabled={current}
-                                      onClick={() => setEditorModel(model)}
-                                      title={current ? '已选择' : '设为当前模型'}
-                                      type="button"
-                                    >
-                                      {current ? <Check size={18} /> : <ChevronRight size={19} />}
-                                    </button>
-                                    <button
-                                      aria-label={`从目录移除 ${model}`}
-                                      className="model-delete-button"
-                                      onClick={() => removeCatalogModel(model)}
-                                      title="从目录移除"
-                                      type="button"
-                                    >
-                                      <Trash2 size={18} />
-                                    </button>
-                                  </div>
-                                )
-                              })}
-                            </div>
-                          ) : (
-                            <div className="model-catalog-empty">
-                              <strong>暂未添加自定义模型</strong>
-                              <span>当前会使用 {selectedProvider.defaultModel}。</span>
-                            </div>
-                          )}
-
-                          <button
-                            className="add-model-button"
-                            disabled={loadingModels}
-                            onClick={fetchAvailableModels}
-                            title={`从 ${selectedProvider.name} 可用模型中添加`}
-                            type="button"
-                          >
-                            <Plus size={17} />添加模型
+                          <button disabled={loadingModels} onClick={fetchAvailableModels} type="button">
+                            {loadingModels ? <LoaderCircle className="spin" size={16} /> : <ShieldCheck size={16} />}
+                            {loadingModels ? '正在测试' : verification.status === 'success' ? '重新测试' : '联通测试并获取模型'}
                           </button>
                         </section>
-                      </div>
-                    ) : null}
 
-                    <footer className="provider-editor-footer">
-                      {providerEditorMode === 'edit' ? (
-                        <button
-                          aria-label={`删除 ${selectedProvider.name} 提供方`}
-                          className="remove-provider-button"
-                          disabled={deleting}
-                          onClick={removeKey}
-                          title="删除提供方"
-                          type="button"
-                        >
-                          {deleting ? <LoaderCircle className="spin" size={18} /> : <Trash2 size={18} />}
-                        </button>
-                      ) : <span />}
-                      <div>
-                        <button className="provider-cancel-button" onClick={closeProviderEditor} type="button">取消</button>
-                        <button className="provider-save-button" disabled={savingProvider} type="submit">
-                          {savingProvider ? <LoaderCircle className="spin" size={17} /> : null}
-                          保存
-                        </button>
-                      </div>
-                    </footer>
-                  </form>
-                ) : null}
+                        {verification.status === 'success' && availableModels.length ? (
+                          <label className="verified-model-field">
+                            <span>模型</span>
+                            <div>
+                              <select onChange={(event) => setEditorModel(event.target.value)} value={editorModel}>
+                                {availableModels.map((model) => (
+                                  <option key={model} value={model}>
+                                    {model === selectedProvider.defaultModel ? `${model}（官方推荐）` : model}
+                                  </option>
+                                ))}
+                              </select>
+                              <button aria-label="刷新模型列表" disabled={loadingModels} onClick={fetchAvailableModels} title="刷新模型列表" type="button">
+                                <RefreshCcw size={17} />
+                              </button>
+                            </div>
+                            <small>可自由切换当前账号返回的文本模型。</small>
+                          </label>
+                        ) : null}
 
-                {(!providerEditorOpen || providerEditorMode === 'edit') && availableProviders.length ? (
-                  <button className="add-provider-button" disabled={loading} onClick={openAddProvider} type="button">
-                    {loading ? <LoaderCircle className="spin" size={19} /> : <Plus size={21} />}
-                    {loading ? '正在读取提供方' : '添加提供方'}
-                  </button>
-                ) : null}
+                        <footer className="provider-editor-footer">
+                          {providerEditorMode === 'edit' ? (
+                            <button
+                              aria-label={`删除 ${selectedProvider.name} 配置`}
+                              className="remove-provider-button"
+                              disabled={deleting}
+                              onClick={removeKey}
+                              title="删除配置"
+                              type="button"
+                            >
+                              {deleting ? <LoaderCircle className="spin" size={18} /> : <Trash2 size={18} />}
+                            </button>
+                          ) : <span />}
+                          <div>
+                            <button className="provider-cancel-button" onClick={closeProviderEditor} type="button">取消</button>
+                            <button
+                              className="provider-save-button"
+                              disabled={savingProvider || verification.status !== 'success'}
+                              type="submit"
+                            >
+                              {savingProvider ? <LoaderCircle className="spin" size={17} /> : null}
+                              {configuredProviders.length === 0 ? '保存并开始使用' : '保存配置'}
+                            </button>
+                          </div>
+                        </footer>
+                      </form>
+                    ) : configuredProviders.length ? (
+                      <section className="active-provider-detail" style={{ '--provider-color': activeProvider.color }}>
+                        <header>
+                          <span className="provider-monogram">{activeProvider.shortName}</span>
+                          <div><strong>{activeProvider.name}</strong><small>{activeProvider.protocol}</small></div>
+                          <span className="active-provider-badge"><Check size={15} />当前使用</span>
+                        </header>
+                        <dl>
+                          <div><dt>当前模型</dt><dd>{selectedModelsByProvider[activeProvider.id] || draft.model}</dd></div>
+                          <div><dt>API 地址</dt><dd>{activeProvider.baseUrl}</dd></div>
+                          <div><dt>API Key</dt><dd>已保存 ····{activeProvider.keyLastFour || '••••'}</dd></div>
+                        </dl>
+                        <footer>
+                          <button className="primary-button" onClick={() => openEditProvider(activeProvider.id)} type="button"><Edit3 size={16} />编辑配置</button>
+                        </footer>
+                      </section>
+                    ) : (
+                      <section className="model-service-empty">
+                        <Database size={24} />
+                        <strong>还没有模型服务</strong>
+                        <span>从左侧添加第一个服务，保存后会自动设为当前使用。</span>
+                      </section>
+                    )}
+                  </div>
+                </div>
               </div>
             ) : (
               <div className="settings-pane contact-settings-pane" data-settings-tab="contact">
@@ -819,49 +912,6 @@ export default function SettingsPage({
         </div>
       </main>
 
-      {modelDialogOpen ? (
-        <div className="model-discovery-overlay" onMouseDown={(event) => {
-          if (event.target === event.currentTarget) setModelDialogOpen(false)
-        }}>
-          <section aria-labelledby="model-discovery-title" aria-modal="true" className="model-discovery-dialog" role="dialog">
-            <header>
-              <h2 id="model-discovery-title">选择要添加的模型</h2>
-              <button aria-label="关闭模型选择" onClick={() => setModelDialogOpen(false)} title="关闭" type="button"><X size={23} /></button>
-            </header>
-            <p>以下是 {selectedProvider.name} 的可用模型，勾选要添加到目录的模型。</p>
-            <div className="model-discovery-toolbar">
-              <button
-                disabled={!modelsAvailableToAdd.length}
-                onClick={() => setCheckedModels(allModelsChecked ? new Set() : new Set(modelsAvailableToAdd))}
-                type="button"
-              >
-                {allModelsChecked ? '取消全选' : '全选'}
-              </button>
-            </div>
-            <div className="model-discovery-list">
-              {modelsAvailableToAdd.length ? modelsAvailableToAdd.map((model) => (
-                <label key={model}>
-                  <input
-                    checked={checkedModels.has(model)}
-                    onChange={() => setCheckedModels((current) => {
-                      const next = new Set(current)
-                      if (next.has(model)) next.delete(model)
-                      else next.add(model)
-                      return next
-                    })}
-                    type="checkbox"
-                  />
-                  <span>{model}</span>
-                </label>
-              )) : <div className="model-discovery-empty">当前清单中没有其他可添加模型。</div>}
-            </div>
-            <footer>
-              <button className="secondary-button" onClick={() => setModelDialogOpen(false)} type="button">取消</button>
-              <button className="primary-button" disabled={!checkedModels.size} onClick={addSelectedModels} type="button">添加所选</button>
-            </footer>
-          </section>
-        </div>
-      ) : null}
     </div>
   )
 }

@@ -9,6 +9,8 @@ import { normalizeTermRecord, stampChangedTerms, touchTerm } from '../src/data/t
 const settings = normalizeProviderSettings({ provider: 'openai', model: 'gpt-4o-mini', autoExplain: true })
 assert.equal(settings.provider, 'openai')
 assert.equal(settings.model, 'gpt-4o-mini')
+assert.equal(settings.hoverExplanationMode, 'both')
+assert.equal(normalizeProviderSettings({ hoverExplanationMode: 'explanation' }).hoverExplanationMode, 'explanation')
 
 const createdAt = '2026-08-29T01:00:00.000Z'
 let terms = [normalizeTermRecord({

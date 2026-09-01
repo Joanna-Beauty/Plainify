@@ -65,10 +65,10 @@ export async function getAiProviders(signal) {
   return requestApi('/ai/providers', { signal })
 }
 
-export async function saveProviderCredential(providerId, apiKey, model = '', baseUrl = '') {
+export async function saveProviderCredential(providerId, apiKey, model = '', baseUrl = '', activate = true) {
   return requestApi(`/ai/providers/${encodeURIComponent(providerId)}/credentials`, {
     method: 'POST',
-    body: JSON.stringify({ apiKey, model, baseUrl }),
+    body: JSON.stringify({ apiKey, model, baseUrl, activate }),
   })
 }
 
@@ -97,17 +97,13 @@ export async function fetchProviderModels(settings = {}, signal) {
   })
   const modelIds = Array.isArray(data.models)
     ? data.models.map((model) => String(model || '')).filter(Boolean)
-    : []
-  const uniqueModels = [...new Set(modelIds.length ? modelIds : provider.fallbackModels)]
+    : provider.fallbackModels
+  const uniqueModels = [...new Set(modelIds)]
   return uniqueModels.sort((a, b) => {
     if (a === provider.defaultModel) return -1
     if (b === provider.defaultModel) return 1
     return a.localeCompare(b)
   })
-}
-
-export async function openLocalConfigFile() {
-  return requestApi('/settings/open-config', { method: 'POST' })
 }
 
 export async function explainTerm(term, settings) {
@@ -164,13 +160,4 @@ export async function organizeWithAi(terms, settings, mode = 'incremental', grou
     .filter((item) => candidateIds.has(item.id) && item.category)
     .map((item) => [item.id, String(item.category)]))
   return terms.map((term) => ({ ...term, category: assignments.get(term.id) || term.category }))
-}
-
-export async function testAiConnection(settings) {
-  const provider = getProvider(settings.provider)
-  const data = await requestApi(`/ai/providers/${encodeURIComponent(provider.id)}/test`, {
-    method: 'POST',
-    body: JSON.stringify({ model: settings.model }),
-  })
-  return String(data.message || '')
 }

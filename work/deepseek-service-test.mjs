@@ -8,7 +8,6 @@ const {
   getBackendStatus,
   organizeLocally,
   organizeWithAi,
-  testAiConnection,
 } = await vite.ssrLoadModule('/src/services/ai.js')
 
 const calls = []
@@ -89,12 +88,6 @@ assert.deepEqual(JSON.parse(calls[2].options.body), {
   model: 'deepseek-reasoner',
 })
 
-await testAiConnection({ apiKey: 'sk-test', provider: 'deepseek', model: 'deepseek-chat' })
-assert.equal(calls[3].url, 'http://127.0.0.1:8787/api/ai/providers/deepseek/test')
-assert.deepEqual(JSON.parse(calls[3].options.body), {
-  model: 'deepseek-chat',
-})
-
 const organized = await organizeWithAi([
   { id: 'term-new', term: 'RAG', explanation: '先检索后回答', category: '未分组' },
   { id: 'term-stable', term: 'Commit', explanation: '一次代码提交', category: '版本控制' },
@@ -102,8 +95,8 @@ const organized = await organizeWithAi([
 assert.equal(organized[0].category, '大模型基础')
 assert.equal(organized[1].category, '版本控制')
 
-assert.equal(calls[4].url, 'http://127.0.0.1:8787/api/organize')
-assert.deepEqual(JSON.parse(calls[4].options.body), {
+assert.equal(calls[3].url, 'http://127.0.0.1:8787/api/organize')
+assert.deepEqual(JSON.parse(calls[3].options.body), {
   model: 'deepseek-chat',
   provider: 'deepseek',
   mode: 'incremental',
@@ -119,9 +112,9 @@ assert.equal(localOrganized[0].category, 'API 与网络')
 assert.equal(localOrganized[1].category, '我的固定分组')
 assert.equal(calls.every((call) => call.url.startsWith('http://127.0.0.1:8787/api/')), true)
 assert.equal(JSON.stringify(calls[2]).includes('sk-test'), false)
-assert.equal(JSON.stringify(calls[4]).includes('sk-test'), false)
+assert.equal(JSON.stringify(calls[3]).includes('sk-test'), false)
 
-console.log('PASS website uses the localhost backend for status, models, explanation, test, and grouping')
+console.log('PASS website uses the localhost backend for status, models, explanation, and grouping')
 console.log('PASS temporary credentials only travel to localhost provider validation endpoints')
 console.log('PASS incremental grouping sends only ungrouped terms and preserves existing categories')
 await vite.close()
