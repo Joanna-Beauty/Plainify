@@ -11,7 +11,8 @@ for (const requiredStep of ['install.command', 'install-from-github.sh', 'npm ci
   assert.ok(readme.includes(requiredStep), `README is missing ${requiredStep}`)
 }
 assert.match(readme, /让 AI 帮你安装/)
-assert.match(readme, /raw\.githubusercontent\.com\/Joanna-Beauty\/Plainify\/main\/install-from-github\.sh/)
+assert.match(readme, /api\.github\.com\/repos\/Joanna-Beauty\/Plainify\/contents\/install-from-github\.sh/)
+assert.match(readme, /Accept: application\/vnd\.github\.raw\+json/)
 
 const githubInstallerPath = path.join(root, 'install-from-github.sh')
 const githubInstaller = read('install-from-github.sh')
