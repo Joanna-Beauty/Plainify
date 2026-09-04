@@ -8,13 +8,19 @@
 
 ## 让 AI 帮你安装（macOS）
 
-把下面整段话复制给可以操作终端的 AI（例如 Codex）：
+复制下面的命令，粘贴给可以操作终端的 AI（例如 Codex），也可以直接粘贴到 Mac 终端：
 
-```text
-请帮我在这台 Mac 上安装“加简大白话 · Plainify”。请先确认脚本来自官方 GitHub 仓库 Joanna-Beauty/Plainify，然后在终端执行：/bin/bash -c "$(curl --proto '=https' --tlsv1.2 -fsSL -H 'Accept: application/vnd.github.raw+json' -H 'X-GitHub-Api-Version: 2022-11-28' https://api.github.com/repos/Joanna-Beauty/Plainify/contents/install-from-github.sh)"。如果缺少 Node.js 20.19 或更高版本，请先帮我安装后重新执行。完成后请确认本机服务正常，并保持术语库网页 http://127.0.0.1:5173/ 处于打开状态。不要读取、回显或替我填写任何 API Key。
+```bash
+plainify_installer="$(mktemp -t plainify-install)" &&
+curl --proto '=https' --tlsv1.2 -fsSL \
+  -H 'Accept: application/vnd.github.raw+json' \
+  -H 'X-GitHub-Api-Version: 2022-11-28' \
+  -o "$plainify_installer" \
+  https://api.github.com/repos/Joanna-Beauty/Plainify/contents/install-from-github.sh &&
+/bin/bash "$plainify_installer"
 ```
 
-AI 会把项目下载到 `~/Applications/Plainify`，安装并启动只监听本机的服务，然后自动打开术语库。这条指令只适用于 macOS；浏览器扩展仍需按下文手动加载。
+命令会把项目下载到 `~/Applications/Plainify`，安装并启动只监听本机的服务，然后自动打开术语库。如果电脑缺少 Node.js 20.19 或更高版本，安装器会打开官方下载页，安装 Node.js 后再粘贴一次这组命令即可。这组命令只适用于 macOS；浏览器扩展仍需按下文手动加载。
 
 ## 目录
 
