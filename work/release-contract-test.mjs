@@ -11,8 +11,11 @@ for (const requiredStep of ['install.command', 'install-from-github.sh', 'npm ci
   assert.ok(readme.includes(requiredStep), `README is missing ${requiredStep}`)
 }
 assert.match(readme, /让 AI 帮你安装/)
+assert.match(readme, /```bash\nplainify_installer="\$\(mktemp -t plainify-install\)" &&/)
 assert.match(readme, /api\.github\.com\/repos\/Joanna-Beauty\/Plainify\/contents\/install-from-github\.sh/)
 assert.match(readme, /Accept: application\/vnd\.github\.raw\+json/)
+assert.match(readme, /\/bin\/bash "\$plainify_installer"/)
+assert.doesNotMatch(readme, /请帮我在这台 Mac 上安装/)
 
 const githubInstallerPath = path.join(root, 'install-from-github.sh')
 const githubInstaller = read('install-from-github.sh')
