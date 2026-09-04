@@ -19,49 +19,28 @@
 
 ### 第 1 步：让 AI 安装网站和本机服务
 
-#### Windows 10/11：让 AI 帮你安装
+使用 **Codex、Claude Code、Cursor Agent、Trae**，或其他明确支持“本机终端”或“电脑操作”的 AI 编程工具。把下面整段安装指令粘贴给它：
 
-复制下面整段命令，粘贴给可以操作 PowerShell 的 AI（例如 Codex）并让它执行。你也可以打开 Windows PowerShell，直接粘贴并按回车。
+```text
+请帮我在这台电脑上安装并打开「加简大白话 · Plainify」。
 
-```powershell
-& {
-  $ErrorActionPreference = 'Stop'
-  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-  $plainifyInstaller = Join-Path $env:TEMP 'plainify-install.ps1'
-  try {
-    Invoke-WebRequest -UseBasicParsing -Headers @{ Accept = 'application/vnd.github.raw+json'; 'X-GitHub-Api-Version' = '2022-11-28' } -Uri 'https://api.github.com/repos/Joanna-Beauty/Plainify/contents/install-from-github.ps1' -OutFile $plainifyInstaller
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File $plainifyInstaller
-    if ($LASTEXITCODE -ne 0) { throw 'Plainify installation did not finish.' }
-  } finally {
-    Remove-Item $plainifyInstaller -Force -ErrorAction SilentlyContinue
-  }
-}
+GitHub 项目：https://github.com/Joanna-Beauty/Plainify
+
+请直接操作本机终端完成安装，不要让我手动下载、解压或双击文件：
+1. 判断当前系统是 Windows 10/11 还是 macOS。
+2. 从项目 main 分支获取并执行对应的一键安装脚本：
+   - Windows：install-from-github.ps1
+   - macOS：install-from-github.sh
+3. 如果缺少 Node.js 20.19 或更高版本，请告诉我如何完成安装；安装好后继续执行同一个脚本。
+4. 确认本机服务已经启动，最后打开 http://127.0.0.1:5173/。
+
+完成后，请告诉我项目文件夹和浏览器扩展 extension 文件夹的位置。
 ```
 
-命令会把项目下载到 `%LOCALAPPDATA%\Plainify`，安装并启动只监听本机的服务，设置登录 Windows 后自动运行，最后打开 `http://127.0.0.1:5173/`。如果安装器打开了 Node.js 下载页，请安装 Node.js 20.19 或更高版本，再执行一次同样的命令。
+> [!NOTE]
+> 普通的豆包、ChatGPT 或 Claude 聊天窗口通常只能回复文字，不能直接操作你的电脑。只有当前版本明确提供本机终端或电脑操作能力时才可以使用；豆包用户也可以改用同属字节跳动的 AI 编程工具 Trae。
 
-#### macOS：让 AI 帮你安装
-
-复制下面整段命令，粘贴给可以操作终端的 AI（例如 Codex）并让它执行。你也可以打开 Mac 自带的“终端”，直接粘贴并按回车。
-
-```bash
-plainify_installer="$(mktemp -t plainify-install)" &&
-curl --proto '=https' --tlsv1.2 -fsSL \
-  -H 'Accept: application/vnd.github.raw+json' \
-  -H 'X-GitHub-Api-Version: 2022-11-28' \
-  -o "$plainify_installer" \
-  https://api.github.com/repos/Joanna-Beauty/Plainify/contents/install-from-github.sh &&
-/bin/bash "$plainify_installer"
-```
-
-这段命令会自动：
-
-1. 把项目下载到 `~/Applications/Plainify`。
-2. 安装项目需要的内容。
-3. 启动只监听本机的服务，并设置为登录 Mac 后自动运行。
-4. 打开加简大白话网站 `http://127.0.0.1:5173/`。
-
-如果安装器打开了 Node.js 下载页，请先安装 Node.js 20.19 或更高版本，再重新执行同一段命令。安装结束后不要移动或删除 `~/Applications/Plainify` 文件夹，浏览器扩展还要使用里面的文件。
+AI 会自动选择 Windows 或 macOS 安装脚本，完成项目下载、本机服务安装和网页打开。Windows 默认安装到 `%LOCALAPPDATA%\Plainify`，macOS 默认安装到 `~/Applications/Plainify`。安装结束后不要移动或删除这个文件夹，浏览器扩展还要使用里面的文件。
 
 ### 第 2 步：连接一个模型
 
@@ -143,18 +122,18 @@ API Key 可以理解为模型服务商发给你的“调用密码”，可能消
 
 ## 下载与版本
 
-- **首次安装完整项目**：复制页面顶部对应系统的安装指令给 AI 或终端。Windows 会安装到 `%LOCALAPPDATA%\Plainify`，macOS 会安装到 `~/Applications/Plainify`，无需手动下载和解压 ZIP。
+- **首次安装完整项目**：复制页面顶部的统一安装指令给能够操作本机终端的 AI。AI 会判断当前系统；Windows 安装到 `%LOCALAPPDATA%\Plainify`，macOS 安装到 `~/Applications/Plainify`，无需手动下载和解压 ZIP。
 - **查看或开发源码**：可以下载 [最新 Release](https://github.com/Joanna-Beauty/Plainify/releases/latest) 页面底部的 **Source code (zip)**，也可以在仓库首页点击 **Code → Download ZIP**。
 - **只更新浏览器扩展**：从最新 Release 下载 `plainify-extension.zip`，解压后在扩展管理页加载其中的 `extension` 文件夹。扩展仍需与完整项目中的本机服务配合使用。
 - **README 图片和 GIF**：这些文件用于在 GitHub 展示安装步骤和使用场景，不参与程序运行。完整源码 ZIP 会包含它们；只下载扩展发布包时不会包含。
 
 ## 安装并启动加简大白话
 
-### Windows 10/11 和 macOS：复制命令安装
+### Windows 10/11 和 macOS：让 AI 安装
 
-使用[四步快速开始](#windows-和-macos-快速开始)中对应系统的命令。AI 或终端会下载完整项目、安装依赖和本机常驻服务，并自动打开网站，不需要手动下载、解压或双击安装文件。
+把[四步快速开始](#windows-和-macos-快速开始)中的统一安装指令粘贴给能够操作本机终端的 AI。AI 会下载完整项目、安装依赖和本机常驻服务，并自动打开网站，不需要手动下载、解压或双击安装文件。
 
-安装过程打开 Node.js 下载页，表示电脑还没有合适版本的 Node.js。完成安装后，重新执行同一段命令。以后使用时直接访问 `http://127.0.0.1:5173/`；运行状态可在项目文件夹的终端中用 `npm run service:status` 检查，日志保存在 `.logs` 文件夹。
+安装过程打开 Node.js 下载页，表示电脑还没有合适版本的 Node.js。完成安装后，把同一段安装指令再次发给 AI，让它继续。以后使用时直接访问 `http://127.0.0.1:5173/`；运行状态可在项目文件夹的终端中用 `npm run service:status` 检查，日志保存在 `.logs` 文件夹。
 
 ### Linux 或需要手动启动时
 
@@ -449,7 +428,7 @@ npm run service:status
 ### 网站打不开，或提示本机服务未连接
 
 1. 确认打开的是 `http://127.0.0.1:5173/`。
-2. Windows 或 macOS 用户重新执行页面顶部对应系统的安装命令。
+2. Windows 或 macOS 用户把页面顶部的统一安装指令再次发给 AI，让它重新检查并启动服务。
 3. 在项目文件夹的终端中运行 `npm run service:status` 检查后台服务。
 4. 手动运行的用户确认 `npm run dev` 所在的终端仍然开启。
 5. 仍无法连接时，运行 `npm run service:install`，再刷新网站；详细错误可查看项目的 `.logs` 文件夹。
