@@ -6,8 +6,19 @@
 
 > 当前版本是本地版：网站、本机服务和浏览器扩展需要配合使用。术语和 API Key 都保存在自己的电脑上，没有账号系统和云同步。
 
+## 让 AI 帮你安装（macOS）
+
+把下面整段话复制给可以操作终端的 AI（例如 Codex）：
+
+```text
+请帮我在这台 Mac 上安装“加简大白话 · Plainify”。请先确认脚本来自官方 GitHub 仓库 Joanna-Beauty/Plainify，然后在终端执行：/bin/bash -c "$(curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/Joanna-Beauty/Plainify/main/install-from-github.sh)"。如果缺少 Node.js 20.19 或更高版本，请先帮我安装后重新执行。完成后请确认本机服务正常，并保持术语库网页 http://127.0.0.1:5173/ 处于打开状态。不要读取、回显或替我填写任何 API Key。
+```
+
+AI 会把项目下载到 `~/Applications/Plainify`，安装并启动只监听本机的服务，然后自动打开术语库。这条指令只适用于 macOS；浏览器扩展仍需按下文手动加载。
+
 ## 目录
 
+- [让 AI 帮你安装（macOS）](#让-ai-帮你安装macos)
 - [开始前需要准备什么](#开始前需要准备什么)
 - [下载与版本](#下载与版本)
 - [安装并启动加简大白话](#安装并启动加简大白话)
@@ -42,6 +53,7 @@
 
 ## 下载与版本
 
+- **让 AI 完成首次安装**：复制页面顶部的安装指令。AI 会直接下载 GitHub 上 `main` 分支的最新源码，无需手动下载和解压 ZIP。
 - **首次安装完整项目**：进入 [最新 Release](https://github.com/Joanna-Beauty/Plainify/releases/latest)，下载页面底部的 **Source code (zip)** 并解压。也可以在仓库首页点击 **Code → Download ZIP**，两种方式都包含网站、本机服务和浏览器扩展。
 - **只更新浏览器扩展**：从最新 Release 下载 `plainify-extension.zip`，解压后在扩展管理页加载其中的 `extension` 文件夹。扩展仍需与完整项目中的本机服务配合使用。
 - **README 图片和 GIF**：这些文件用于在 GitHub 展示安装步骤和使用场景，不参与程序运行。完整源码 ZIP 会包含它们；只下载扩展发布包时不会包含。
