@@ -17,16 +17,28 @@
 
 从进入 GitHub 到完成第一次解释，一共四步。没有使用过 Git 或终端也可以按下面的顺序操作。
 
-### 第 1 步：安装网站和本机服务
+### 第 1 步：让 AI 安装网站和本机服务
 
-#### Windows 10/11
+#### Windows 10/11：让 AI 帮你安装
 
-1. 下载 [`main` 分支源码 ZIP](https://github.com/Joanna-Beauty/Plainify/archive/refs/heads/main.zip) 并解压。
-2. 打开解压后的项目文件夹，双击 `install-windows.cmd`。
-3. 如果安装器打开了 Node.js 下载页，请先安装 Node.js 20.19 或更高版本，再双击一次 `install-windows.cmd`。
-4. 等待浏览器自动打开 `http://127.0.0.1:5173/`。安装成功后可以关闭安装窗口，本机服务会继续在后台运行，并在登录 Windows 后自动启动。
+复制下面整段命令，粘贴给可以操作 PowerShell 的 AI（例如 Codex）并让它执行。你也可以打开 Windows PowerShell，直接粘贴并按回车。
 
-安装完成后不要移动或删除项目文件夹。浏览器扩展和 Windows 登录启动项都会继续使用这个位置。
+```powershell
+& {
+  $ErrorActionPreference = 'Stop'
+  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+  $plainifyInstaller = Join-Path $env:TEMP 'plainify-install.ps1'
+  try {
+    Invoke-WebRequest -UseBasicParsing -Headers @{ Accept = 'application/vnd.github.raw+json'; 'X-GitHub-Api-Version' = '2022-11-28' } -Uri 'https://api.github.com/repos/Joanna-Beauty/Plainify/contents/install-from-github.ps1' -OutFile $plainifyInstaller
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File $plainifyInstaller
+    if ($LASTEXITCODE -ne 0) { throw 'Plainify installation did not finish.' }
+  } finally {
+    Remove-Item $plainifyInstaller -Force -ErrorAction SilentlyContinue
+  }
+}
+```
+
+命令会把项目下载到 `%LOCALAPPDATA%\Plainify`，安装并启动只监听本机的服务，设置登录 Windows 后自动运行，最后打开 `http://127.0.0.1:5173/`。如果安装器打开了 Node.js 下载页，请安装 Node.js 20.19 或更高版本，再执行一次同样的命令。
 
 #### macOS：让 AI 帮你安装
 
@@ -66,7 +78,7 @@ API Key 可以理解为模型服务商发给你的“调用密码”，可能消
 1. 在浏览器地址栏输入 `chrome://extensions`；使用 Edge 时输入 `edge://extensions`。
 2. 打开页面右上角的 **开发者模式** 或 **开发人员模式**。
 3. 点击 **加载已解压的扩展程序** 或 **加载解压缩的扩展**。
-4. Windows 用户选择刚才解压的项目中的 `extension` 文件夹；macOS 用户可以按 `Command + Shift + G`，粘贴 `~/Applications/Plainify/extension`，按回车后选择这个文件夹。
+4. Windows 用户在文件选择窗口的地址栏粘贴 `%LOCALAPPDATA%\Plainify\extension`；macOS 用户可以按 `Command + Shift + G`，粘贴 `~/Applications/Plainify/extension`。按回车后选择这个文件夹。
 5. 看到“加简大白话 · Plainify”后，建议把它固定在浏览器工具栏。
 
 回到刚才自动打开的加简大白话网站并刷新。进入 **设置 → 通用设置**，看到浏览器扩展状态为“已连接”，就说明这一步完成了。
@@ -115,12 +127,11 @@ API Key 可以理解为模型服务商发给你的“调用密码”，可能消
 
 ## 开始前需要准备什么
 
-请先准备下面四样东西：
+请先准备下面三样东西：
 
 1. **Chrome 或 Edge 浏览器**：加简大白话的浏览器扩展目前支持这两款浏览器。
 2. **Node.js 20.19 或更高版本**：这是让加简大白话在电脑上运行的基础软件。Windows 和 macOS 安装脚本都会自动检查；如果没有安装，会打开 [Node.js 官方下载页](https://nodejs.org/zh-cn/download)。
 3. **一个受支持模型服务商的 API Key**：API Key 可以理解为模型服务商发给你的“调用密码”。加简大白话用它向模型请求解释。请从服务商的官方控制台创建，不要把 Key 发给别人。
-4. **已解压的完整项目文件夹**：浏览器加载扩展后不能随意移动或删除其中的 `extension` 文件夹。
 
 当前支持的模型服务商有 DeepSeek、OpenAI、阿里云百炼、Moonshot AI 和智谱 AI。你只需要任选一个，不必全部注册。
 
@@ -132,41 +143,18 @@ API Key 可以理解为模型服务商发给你的“调用密码”，可能消
 
 ## 下载与版本
 
-- **让 AI 完成首次安装**：复制页面顶部的安装指令。AI 会直接下载 GitHub 上 `main` 分支的最新源码，无需手动下载和解压 ZIP。
-- **首次安装完整项目**：进入 [最新 Release](https://github.com/Joanna-Beauty/Plainify/releases/latest)，下载页面底部的 **Source code (zip)** 并解压。也可以在仓库首页点击 **Code → Download ZIP**，两种方式都包含网站、本机服务和浏览器扩展。
+- **首次安装完整项目**：复制页面顶部对应系统的安装指令给 AI 或终端。Windows 会安装到 `%LOCALAPPDATA%\Plainify`，macOS 会安装到 `~/Applications/Plainify`，无需手动下载和解压 ZIP。
+- **查看或开发源码**：可以下载 [最新 Release](https://github.com/Joanna-Beauty/Plainify/releases/latest) 页面底部的 **Source code (zip)**，也可以在仓库首页点击 **Code → Download ZIP**。
 - **只更新浏览器扩展**：从最新 Release 下载 `plainify-extension.zip`，解压后在扩展管理页加载其中的 `extension` 文件夹。扩展仍需与完整项目中的本机服务配合使用。
 - **README 图片和 GIF**：这些文件用于在 GitHub 展示安装步骤和使用场景，不参与程序运行。完整源码 ZIP 会包含它们；只下载扩展发布包时不会包含。
 
 ## 安装并启动加简大白话
 
-### Windows 10/11：双击安装
+### Windows 10/11 和 macOS：复制命令安装
 
-1. 下载并解压完整项目源码。
-2. 双击项目根目录中的 `install-windows.cmd`。
-3. 安装器会检查 Node.js、安装依赖、启动本机服务、设置登录 Windows 后自动运行，并打开网站。
-4. 浏览器打开 `http://127.0.0.1:5173/` 后即可关闭安装窗口。
+使用[四步快速开始](#windows-和-macos-快速开始)中对应系统的命令。AI 或终端会下载完整项目、安装依赖和本机常驻服务，并自动打开网站，不需要手动下载、解压或双击安装文件。
 
-Windows 安装不要求管理员权限。以后直接访问 `http://127.0.0.1:5173/` 即可；更新项目或移动项目文件夹后，需要重新双击 `install-windows.cmd`。运行状态可在项目文件夹的终端中用 `npm run service:status` 检查，日志保存在 `.logs` 文件夹。
-
-### macOS：下载 ZIP 后双击安装
-
-如果不使用上面的命令，也可以先下载完整项目，再双击安装：
-
-1. 按照上一节从最新 Release 下载 **Source code (zip)**，或在仓库首页使用 **Code → Download ZIP**。
-2. 在“下载”文件夹找到 ZIP 压缩包，双击解压。
-3. 打开解压后的项目文件夹，找到 `install.command`。
-4. 双击 `install.command`。系统会打开一个终端窗口并自动安装需要的内容，不需要在里面输入命令。
-5. 等待安装结束。成功后，浏览器会自动打开 `http://127.0.0.1:5173/`，页面上会看到“三步开始积累自己的术语库”。
-
-如果 macOS 提示“无法验证开发者”：
-
-1. 回到项目文件夹，右键点击 `install.command`。
-2. 点击 **打开**。
-3. 在确认窗口中再次点击 **打开**。
-
-安装脚本会检查 Node.js、安装项目依赖、安装登录后自动运行的本机服务，并打开网站。以后使用时，直接访问 `http://127.0.0.1:5173/` 即可。
-
-> 安装过程中打开 Node.js 下载页，表示电脑还没有合适版本的 Node.js。完成 Node.js 安装后，重新双击 `install.command`。
+安装过程打开 Node.js 下载页，表示电脑还没有合适版本的 Node.js。完成安装后，重新执行同一段命令。以后使用时直接访问 `http://127.0.0.1:5173/`；运行状态可在项目文件夹的终端中用 `npm run service:status` 检查，日志保存在 `.logs` 文件夹。
 
 ### Linux 或需要手动启动时
 
@@ -200,7 +188,7 @@ npm run service:status
 1. 在 Chrome 地址栏输入 `chrome://extensions`，按回车。
 2. 打开页面右上角的 **开发者模式**。
 3. 点击 **加载已解压的扩展程序**。
-4. 在文件选择窗口中，打开刚才解压的项目文件夹，选中里面的 `extension` 文件夹，再点击 **选择**。
+4. Windows 用户在地址栏粘贴 `%LOCALAPPDATA%\Plainify\extension`；macOS 用户按 `Command + Shift + G` 并粘贴 `~/Applications/Plainify/extension`。按回车后选择这个文件夹。
 5. 成功后，扩展列表中会出现“加简大白话 · Plainify”。
 
 ### Edge
@@ -208,7 +196,7 @@ npm run service:status
 1. 在 Edge 地址栏输入 `edge://extensions`，按回车。
 2. 打开 **开发人员模式**。
 3. 点击 **加载解压缩的扩展**。
-4. 选中项目里的 `extension` 文件夹。
+4. Windows 用户在地址栏粘贴 `%LOCALAPPDATA%\Plainify\extension`；macOS 用户按 `Command + Shift + G` 并粘贴 `~/Applications/Plainify/extension`。按回车后选择这个文件夹。
 5. 成功后，扩展列表中会出现“加简大白话 · Plainify”。
 
 ### 确认扩展已经连接
@@ -461,7 +449,7 @@ npm run service:status
 ### 网站打不开，或提示本机服务未连接
 
 1. 确认打开的是 `http://127.0.0.1:5173/`。
-2. Windows 用户重新双击 `install-windows.cmd`；macOS 用户重新双击 `install.command`。
+2. Windows 或 macOS 用户重新执行页面顶部对应系统的安装命令。
 3. 在项目文件夹的终端中运行 `npm run service:status` 检查后台服务。
 4. 手动运行的用户确认 `npm run dev` 所在的终端仍然开启。
 5. 仍无法连接时，运行 `npm run service:install`，再刷新网站；详细错误可查看项目的 `.logs` 文件夹。

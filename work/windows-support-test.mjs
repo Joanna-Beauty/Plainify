@@ -21,6 +21,13 @@ const installer = read('install-windows.cmd')
 assert.match(installer, /%~dp0install-windows\.ps1/)
 assert.match(installer, /PLAINIFY_NONINTERACTIVE/)
 
+const githubInstaller = read('install-from-github.ps1')
+assert.match(githubInstaller, /archive\/refs\/heads\/main\.zip/)
+assert.match(githubInstaller, /LOCALAPPDATA/)
+assert.match(githubInstaller, /PLAINIFY_INSTALL_DIR/)
+assert.match(githubInstaller, /install-windows\.ps1/)
+assert.match(githubInstaller, /not a complete Plainify project/)
+
 const serviceInstaller = read('server/install-windows-service.ps1')
 assert.match(serviceInstaller, /CurrentVersion\\Run/)
 assert.match(serviceInstaller, /run-windows-service\.ps1/)
@@ -42,6 +49,20 @@ if (process.platform !== 'win32') {
   console.log('SKIP Windows runtime smoke test on non-Windows platform')
   process.exit(0)
 }
+
+const githubInstallerDryRun = spawnSync('powershell.exe', [
+  '-NoProfile',
+  '-ExecutionPolicy',
+  'Bypass',
+  '-File',
+  'install-from-github.ps1',
+  '-DryRun',
+], {
+  cwd: root,
+  encoding: 'utf8',
+})
+assert.equal(githubInstallerDryRun.status, 0, githubInstallerDryRun.stderr || githubInstallerDryRun.stdout)
+assert.match(githubInstallerDryRun.stdout, /PASS Windows GitHub installer dry run/)
 
 const dryRun = spawnSync(process.execPath, ['server/install-service.mjs', '-DryRun'], {
   cwd: root,
