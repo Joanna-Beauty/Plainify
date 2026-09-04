@@ -7,9 +7,21 @@ const root = path.resolve(import.meta.dirname, '..')
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8')
 
 const readme = read('README.md')
-for (const requiredStep of ['install.command', 'npm ci', 'npm run dev', 'npm run service:install', 'chrome://extensions', 'edge://extensions']) {
+for (const requiredStep of ['install.command', 'install-from-github.sh', 'npm ci', 'npm run dev', 'npm run service:install', 'chrome://extensions', 'edge://extensions']) {
   assert.ok(readme.includes(requiredStep), `README is missing ${requiredStep}`)
 }
+assert.match(readme, /让 AI 帮你安装/)
+assert.match(readme, /raw\.githubusercontent\.com\/Joanna-Beauty\/Plainify\/main\/install-from-github\.sh/)
+
+const githubInstallerPath = path.join(root, 'install-from-github.sh')
+const githubInstaller = read('install-from-github.sh')
+assert.ok((fs.statSync(githubInstallerPath).mode & 0o111) !== 0, 'install-from-github.sh must be executable')
+execFileSync('bash', ['-n', githubInstallerPath])
+assert.match(githubInstaller, /github\.com\/\$\{REPOSITORY\}\/archive\/refs\/heads\/main\.zip/)
+assert.match(githubInstaller, /Applications\/Plainify/)
+assert.match(githubInstaller, /PLAINIFY_NONINTERACTIVE=1 \/bin\/zsh/)
+assert.match(githubInstaller, /install\.command/)
+assert.doesNotMatch(githubInstaller, /\/Users\//)
 
 const installerPath = path.join(root, 'install.command')
 const installer = read('install.command')
@@ -18,6 +30,7 @@ assert.match(installer, /dirname "\$0"/)
 assert.match(installer, /npm ci/)
 assert.match(installer, /npm run service:install/)
 assert.match(installer, /open "http:\/\/127\.0\.0\.1:5173\/"/)
+assert.match(installer, /PLAINIFY_NONINTERACTIVE/)
 assert.doesNotMatch(installer, /\/Users\//)
 
 const envExample = read('.env.example')
@@ -222,6 +235,7 @@ assert.match(read('extension/popup.css'), /body > header strong \{[\s\S]*?font-f
 
 console.log('PASS 根目录文档覆盖安装、启动和扩展安装步骤')
 console.log('PASS macOS 一键安装从仓库位置解析路径并自动打开网站')
+console.log('PASS GitHub 提供可复制给 AI 的安装指令并支持自动下载项目')
 console.log('PASS 配置模板仅含占位符，.env.local 被 Git 排除且不进入扩展包')
 console.log('PASS 扩展生成提示显示后端当前提供方与具体模型，不再硬编码 DeepSeek')
 console.log('PASS 扩展工具栏、管理页和弹窗标题使用与网站一致的 Logo')

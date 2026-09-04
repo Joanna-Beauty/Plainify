@@ -6,7 +6,9 @@ PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$PROJECT_ROOT" || exit 1
 
 pause_before_exit() {
-  read -r "reply?按 Enter 键关闭这个窗口..."
+  if [[ "${PLAINIFY_NONINTERACTIVE:-0}" != "1" && -t 0 ]]; then
+    read -r "reply?按 Enter 键关闭这个窗口..."
+  fi
 }
 
 fail() {
