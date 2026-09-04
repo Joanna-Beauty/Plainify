@@ -1,4 +1,5 @@
 import http from 'node:http'
+import { execFileSync } from 'node:child_process'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -527,6 +528,29 @@ function envLine(key, value) {
   return `${key}=${JSON.stringify(value)}`
 }
 
+async function secureConfigFile(filePath) {
+  if (process.platform !== 'win32') {
+    await fs.chmod(filePath, 0o600)
+    return
+  }
+
+  const identity = execFileSync('whoami.exe', ['/user', '/fo', 'csv', '/nh'], {
+    encoding: 'ascii',
+    windowsHide: true,
+  }).match(/S-\d(?:-\d+)+/)?.[0]
+  if (!identity) throw new Error('无法确认当前 Windows 用户，配置文件权限未修改')
+  execFileSync('icacls.exe', [
+    filePath,
+    '/inheritance:r',
+    '/grant:r',
+    `*${identity}:(F)`,
+  ], {
+    encoding: 'utf8',
+    windowsHide: true,
+    stdio: 'pipe',
+  })
+}
+
 async function persistConfigValues(updates) {
   const operation = async () => {
     let source = ''
@@ -557,8 +581,14 @@ async function persistConfigValues(updates) {
     }
 
     const temporaryPath = `${configFilePath}.tmp-${process.pid}-${Date.now()}`
-    await fs.writeFile(temporaryPath, `${nextLines.join('\n')}\n`, { mode: 0o600 })
-    await fs.rename(temporaryPath, configFilePath)
+    try {
+      await fs.writeFile(temporaryPath, `${nextLines.join('\n')}\n`, { mode: 0o600 })
+      await secureConfigFile(temporaryPath)
+      await fs.rename(temporaryPath, configFilePath)
+    } catch (error) {
+      await fs.rm(temporaryPath, { force: true }).catch(() => {})
+      throw error
+    }
     for (const [key, value] of pending) {
       if (value === null) delete process.env[key]
       else process.env[key] = String(value)

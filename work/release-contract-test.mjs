@@ -7,7 +7,7 @@ const root = path.resolve(import.meta.dirname, '..')
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8')
 
 const readme = read('README.md')
-for (const requiredStep of ['install.command', 'install-from-github.sh', 'npm ci', 'npm run dev', 'npm run service:install', 'chrome://extensions', 'edge://extensions']) {
+for (const requiredStep of ['install.command', 'install-windows.cmd', 'install-from-github.sh', 'npm ci', 'npm run dev', 'npm run service:install', 'npm run service:status', 'chrome://extensions', 'edge://extensions']) {
   assert.ok(readme.includes(requiredStep), `README is missing ${requiredStep}`)
 }
 assert.match(readme, /让 AI 帮你安装/)
@@ -37,6 +37,16 @@ assert.match(installer, /open "http:\/\/127\.0\.0\.1:5173\/"/)
 assert.match(installer, /PLAINIFY_NONINTERACTIVE/)
 assert.doesNotMatch(installer, /\/Users\//)
 
+const windowsInstaller = read('install-windows.cmd')
+assert.match(windowsInstaller, /%~dp0install-windows\.ps1/)
+assert.match(windowsInstaller, /PLAINIFY_NONINTERACTIVE/)
+const windowsInstallerScript = read('install-windows.ps1')
+assert.match(windowsInstallerScript, /20\.19\.0/)
+assert.match(windowsInstallerScript, /server\/install-service\.mjs/)
+assert.match(windowsInstallerScript, /127\.0\.0\.1:8787\/api\/health/)
+assert.match(windowsInstallerScript, /127\.0\.0\.1:5173/)
+assert.doesNotMatch(windowsInstallerScript, /[A-Z]:\\Users\\/i)
+
 const envExample = read('.env.example')
 assert.match(envExample, /DEEPSEEK_API_KEY=sk-your-deepseek-key/)
 assert.match(envExample, /OPENAI_API_KEY=sk-your-openai-key/)
@@ -53,6 +63,9 @@ for (const [dependency, version] of Object.entries({
 assert.match(read('LICENSE'), /^MIT License$/m)
 assert.match(read('SECURITY.md'), /Private vulnerability reporting/)
 assert.match(read('.github/workflows/ci.yml'), /npm run test:release/)
+assert.match(read('.github/workflows/ci.yml'), /runs-on: windows-latest/)
+assert.match(read('.github/workflows/ci.yml'), /npm run test:windows/)
+assert.match(read('.github/workflows/ci.yml'), /node work\/model-config-test\.mjs/)
 assert.match(read('.github/dependabot.yml'), /package-ecosystem: npm/)
 
 if (fs.existsSync(path.join(root, '.git'))) {

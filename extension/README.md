@@ -1,6 +1,6 @@
 # 加简大白话 · Plainify 浏览器插件
 
-1. 首次使用先在项目根目录双击 `install.command`，或运行 `npm run service:install` 安装本机常驻服务。
+1. 首次使用先在项目根目录双击 Windows 的 `install-windows.cmd` 或 macOS 的 `install.command`，也可以运行 `npm run service:install` 安装本机常驻服务。
 2. Chrome 打开 `chrome://extensions`；Edge 打开 `edge://extensions`。
 3. 开启“开发者模式”。
 4. 点击“加载已解压的扩展程序”，选择本目录 `extension/`。
@@ -28,6 +28,6 @@
 
 当前模型服务余额不足时，后端会显示明确状态并按递增间隔自动检查。充值到账后连接会自动恢复，不需要重启网站、后端或浏览器扩展；插件弹窗保持打开时也会自动刷新连接状态。
 
-本机常驻服务会在 macOS 登录后自动启动，并在意外退出时自动拉起。可用 `npm run service:status` 检查运行状态；日志保存在项目的 `.logs/` 目录中。
+本机常驻服务会在 Windows 或 macOS 登录后自动启动，并在意外退出时自动拉起。可用 `npm run service:status` 检查运行状态；日志保存在项目的 `.logs/` 目录中。
 
 当前本地开发版会在 `127.0.0.1` 或 `localhost` 上识别加简大白话网页；正式部署时应把 `content.js` 中的可信应用域名换成实际域名。
