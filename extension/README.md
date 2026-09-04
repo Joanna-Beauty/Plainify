@@ -1,6 +1,6 @@
 # 加简大白话 · Plainify 浏览器插件
 
-1. 首次使用先在项目根目录双击 Windows 的 `install-windows.cmd` 或 macOS 的 `install.command`，也可以运行 `npm run service:install` 安装本机常驻服务。
+1. 首次使用先复制根目录 README 中对应 Windows 或 macOS 的安装命令给 AI 或终端；已经下载源码时也可以运行 `npm run service:install` 安装本机常驻服务。
 2. Chrome 打开 `chrome://extensions`；Edge 打开 `edge://extensions`。
 3. 开启“开发者模式”。
 4. 点击“加载已解压的扩展程序”，选择本目录 `extension/`。
