@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import fs from 'node:fs/promises'
 import http from 'node:http'
 import os from 'node:os'
@@ -264,7 +264,23 @@ try {
   assert.match(configAfterSave, new RegExp(`OPENAI_BASE_URL="http://127\\.0\\.0\\.1:${providerPort}/v1"`))
   assert.match(configAfterSave, /PLAINIFY_AI_PROVIDER="openai"/)
   assert.match(configAfterSave, /PLAINIFY_AI_MODEL="gpt-4o-mini"/)
-  assert.equal((await fs.stat(configPath)).mode & 0o777, 0o600)
+  if (process.platform === 'win32') {
+    const aclCheck = execFileSync('powershell.exe', [
+      '-NoProfile',
+      '-Command',
+      '$acl = [System.IO.File]::GetAccessControl($env:PLAINIFY_ACL_TEST_PATH); $rules = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])); $inherited = @($rules | Where-Object IsInherited).Count; $fullControl = @($rules | Where-Object { $_.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl }).Count; Write-Output "$($acl.AreAccessRulesProtected)|$inherited|$fullControl"',
+    ], {
+      encoding: 'utf8',
+      windowsHide: true,
+      env: { ...process.env, PLAINIFY_ACL_TEST_PATH: configPath },
+    }).trim()
+    const [isProtected, inheritedCount, fullControlCount] = aclCheck.split('|')
+    assert.equal(isProtected, 'True')
+    assert.equal(inheritedCount, '0')
+    assert.ok(Number(fullControlCount) >= 1)
+  } else {
+    assert.equal((await fs.stat(configPath)).mode & 0o777, 0o600)
+  }
 
   const restartedPort = await reservePort()
   const restarted = spawn(process.execPath, ['--env-file', configPath, 'server/index.mjs'], {
@@ -327,7 +343,7 @@ try {
   console.log('PASS 保存、切换和联通测试只读取模型目录，不发起对话生成')
   console.log('PASS 解释请求始终使用后端当前生效的提供方和具体模型')
   console.log('PASS API 响应不回传完整 Key，扩展来源不能修改配置')
-  console.log('PASS Key 可替换、按 0600 权限保存并在后端重启后恢复')
+  console.log('PASS Key 可替换、按当前系统私有权限保存并在后端重启后恢复')
   console.log('PASS 删除 Key 时同步移除自定义地址，保留未知字段并停止调用对应提供方')
 } finally {
   await close(server)

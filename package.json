@@ -6,16 +6,18 @@
   "type": "module",
   "scripts": {
     "setup:mac": "./install.command",
+    "setup:windows": ".\\install-windows.cmd",
     "dev": "node --env-file-if-exists=.env.local server/dev.mjs",
     "dev:web": "vite --host 127.0.0.1",
     "api": "node --env-file-if-exists=.env.local server/index.mjs",
-    "service:install": "node server/install-macos-service.mjs",
-    "service:status": "launchctl print gui/$(id -u)/com.baihuaben.local",
+    "service:install": "node server/install-service.mjs",
+    "service:status": "node server/status-service.mjs",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
     "lint": "eslint .",
     "test:core": "node work/onboarding-test.mjs && node work/archive-test.mjs && node work/grouping-test.mjs && node work/review-test.mjs && node work/term-sync-test.mjs && node work/sync-race-test.cjs && node work/extension-archive-highlight-test.mjs && node work/deepseek-service-test.mjs && node work/deepseek-recovery-test.mjs && node work/core-flow-test.mjs",
-    "test:release": "node work/model-config-test.mjs && npm run test:core && node work/release-contract-test.mjs"
+    "test:windows": "node work/windows-support-test.mjs",
+    "test:release": "node work/model-config-test.mjs && npm run test:core && npm run test:windows && node work/release-contract-test.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "6.1.1",
